@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSV Profiler</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>DataProfiler</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" id="nav-profiler">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Profiler</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-runs">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Runs</span>
+      </a>
+      <a href="#" class="nav-item nav-item-disabled" id="nav-settings" aria-disabled="true" title="Settings are not available yet">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        <span>Settings</span>
+      </a>
+    </nav>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <div class="layout">
+
+    <header class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="breadcrumb-root">CSV Profiler</span>
+        <span class="breadcrumb-sep">›</span>
+        <span class="breadcrumb-current">EDA Report</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn-sm" id="new-analysis" style="display:none;">+ New Run</button>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- ══════════════════════════════════════
+           UPLOAD SECTION
+      ══════════════════════════════════════ -->
+      <section id="upload-section">
+        <div class="page-title">
+          <h1>CSV Data Profiler</h1>
+          <p class="page-subtitle">Upload a CSV file to generate an interactive profiling report.</p>
+        </div>
+
+        <div class="panels-row">
+          <!-- Drop zone -->
+          <div class="card" style="flex:1; min-width:280px;">
+            <div class="card-header">Upload Dataset</div>
+            <div class="card-body">
+              <div id="drop-zone" class="drop-zone" role="button" tabindex="0">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <p class="drop-title">Drag &amp; drop CSV here</p>
+                <p class="drop-sub">or <span id="browse-trigger" class="link-btn">click to browse</span></p>
+                <input type="file" id="file-input" accept=".csv" hidden />
+              </div>
+              <div id="file-card" class="file-row hidden">
+                <div class="file-row__left">
+                  <span class="file-icon">📄</span>
+                  <div>
+                    <div id="file-name" class="file-name">—</div>
+                    <div id="file-size" class="file-size">—</div>
+                  </div>
+                </div>
+                <button id="remove-file" class="btn-ghost-sm">✕</button>
+              </div>
+              <button id="analyse-btn" class="btn-primary" disabled>Run Profiling</button>
+            </div>
+          </div>
+
+          <!-- Info -->
+          <div class="card" style="width:220px; flex-shrink:0;">
+            <div class="card-header">About</div>
+            <div class="card-body">
+              <ul class="info-list">
+                <li><span class="info-dot"></span> Descriptive statistics</li>
+                <li><span class="info-dot"></span> Correlation analysis when available</li>
+                <li><span class="info-dot"></span> Missing value analysis</li>
+                <li><span class="info-dot"></span> Automated EDA report</li>
+                <li><span class="info-dot"></span> Type inference from CSV data</li>
+              </ul>
+              <div class="powered-by">Powered by <strong>ydata_profiling</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Past sessions table -->
+        <div class="card sessions-card">
+          <div class="card-header sessions-header">
+            <span>Past Sessions</span>
+            <button class="btn-ghost-sm" id="clear-all-btn" title="Delete all sessions">Clear All</button>
+          </div>
+          <div id="sessions-table-wrap">
+            <p class="sessions-empty" id="sessions-empty">No previous sessions found.</p>
+            <table class="sessions-table hidden" id="sessions-table">
+              <thead>
+                <tr>
+                  <th>Date / Time</th>
+                  <th>Filename</th>
+                  <th>Rows</th>
+                  <th>Cols</th>
+                  <th>ID</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="sessions-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PROGRESS SECTION
+      ══════════════════════════════════════ -->
+      <section id="progress-section" class="hidden">
+        <div class="page-title"><h1>Running Analysis…</h1></div>
+        <div class="card" style="max-width:580px;">
+          <div class="card-header">Profiling Progress</div>
+          <div class="card-body">
+            <div class="prog-meta">
+              <span id="progress-label" class="prog-status">Initialising…</span>
+              <span id="progress-pct"   class="prog-pct">0%</span>
+            </div>
+            <div class="prog-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+              <div id="progress-bar" class="prog-fill"></div>
+            </div>
+            <div class="step-list" id="step-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           REPORT SECTION  (30 | 70 layout)
+      ══════════════════════════════════════ -->
+      <section id="report-section" class="hidden">
+
+        <!-- Header row -->
+        <div class="report-page-header">
+          <div>
+            <h1 class="page-title-inline">Profiling Report</h1>
+            <p id="report-meta-text" class="page-subtitle"></p>
+          </div>
+          <div class="report-header-actions">
+            <button id="open-new-tab" class="btn-sm">Open in new tab ↗</button>
+            <button id="reset-btn"    class="btn-danger-sm">Reset Report</button>
+          </div>
+        </div>
+
+        <!-- 30 | 70 split -->
+        <div class="report-layout">
+
+          <!-- ── LEFT 30%: Cleaning Panel ── -->
+          <div class="panel-left">
+            <div class="card cleaning-card">
+              <div class="card-header cleaning-card-header">
+                <span>Data Cleaning</span>
+                <button id="apply-clean-btn" class="btn-primary-sm" disabled>▶ Apply &amp; Download</button>
+              </div>
+              <div id="cleaning-panel-body" class="cleaning-body">
+                <p class="cleaning-empty">Load a session to see cleaning options.</p>
+              </div>
+              <!-- Result -->
+              <div id="clean-result" class="clean-result hidden">
+                <div id="clean-result-body"></div>
+                <a id="download-link" class="btn-primary" href="#" target="_blank"
+                   style="text-decoration:none; display:none; margin-top:8px;">
+                  ⬇ Download Cleaned CSV
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── RIGHT 70%: EDA Iframe ── -->
+          <div class="panel-right">
+            <div class="report-wrapper">
+              <iframe id="report-frame" title="Data Profiling Report"
+                      sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
+            </div>
+          </div>
+
+        </div><!-- /report-layout -->
+
+        <div class="playground-card card">
+          <div class="card-header playground-header">
+            <span>Pandas Playground</span>
+            <span id="playground-status" class="playground-status">Working on current session data</span>
+          </div>
+          <div class="playground-body">
+            <div class="playground-controls">
+              <label>
+                Operation
+                <select id="pg-operation" class="clean-select">
+                  <option value="preview">Preview</option>
+                  <option value="head">head(n)</option>
+                  <option value="tail">tail(n)</option>
+                  <option value="sample">sample(n)</option>
+                  <option value="describe">describe()</option>
+                  <option value="value_counts">value_counts(column)</option>
+                  <option value="sort_values">sort_values(column)</option>
+                  <option value="filter">filter column</option>
+                  <option value="chart">visualize chart</option>
+                  <option value="drop_columns">drop columns</option>
+                  <option value="drop_rows">drop rows by index</option>
+                  <option value="set_cell">set cell value</option>
+                  <option value="fillna">fill missing values</option>
+                  <option value="rename_column">rename column</option>
+                  <option value="astype">change column dtype</option>
+                </select>
+              </label>
+              <label>
+                Column / X
+                <input id="pg-column" class="pg-input" placeholder="column name" />
+              </label>
+              <label>
+                Y / New name
+                <input id="pg-column-2" class="pg-input" placeholder="optional" />
+              </label>
+              <label>
+                Value
+                <input id="pg-value" class="pg-input" placeholder="filter/fill/cell value" />
+              </label>
+              <label>
+                Rows / Indexes
+                <input id="pg-indexes" class="pg-input" placeholder="0, 3, 7" />
+              </label>
+              <label>
+                N / Limit
+                <input id="pg-limit" class="pg-input" type="number" min="1" max="500" value="20" />
+              </label>
+              <label>
+                Chart
+                <select id="pg-chart-type" class="clean-select">
+                  <option value="bar">bar</option>
+                  <option value="line">line</option>
+                  <option value="scatter">scatter</option>
+                  <option value="hist">histogram</option>
+                </select>
+              </label>
+              <label>
+                Compare
+                <select id="pg-operator" class="clean-select">
+                  <option value="eq">=</option>
+                  <option value="ne">!=</option>
+                  <option value="gt">&gt;</option>
+                  <option value="gte">&gt;=</option>
+                  <option value="lt">&lt;</option>
+                  <option value="lte">&lt;=</option>
+                  <option value="contains">contains</option>
+                </select>
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="pg-run" class="btn-primary-sm">Run</button>
+              <button id="pg-apply" class="btn-danger-sm">Apply Mutation</button>
+            </div>
+            <div class="playground-output">
+              <div class="pg-chart-wrap"><canvas id="pg-chart" width="720" height="260"></canvas></div>
+              <div id="pg-table-wrap" class="pg-table-wrap"></div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Confirm modal -->
+  <div id="confirm-overlay" class="confirm-overlay hidden">
+    <div class="confirm-dialog">
+      <p id="confirm-msg" class="confirm-msg">Are you sure?</p>
+      <div class="confirm-actions">
+        <button id="confirm-ok"     class="btn-danger-sm">Confirm</button>
+        <button id="confirm-cancel" class="btn-sm">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

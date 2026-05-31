@@ -1,0 +1,10 @@
+python/.venv/
+python/__pycache__/
+
+uploads/*
+!/uploads/Placeholder.txt
+
+reports/*
+!/reports/Placeholder.txt
+
+doc/*
