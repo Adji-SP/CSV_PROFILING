@@ -66,6 +66,7 @@ body {
   position: sticky; top: 0; z-index: 50;
 }
 .topbar-breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
 .breadcrumb-root { color: #6b7280; }
 .breadcrumb-sep  { color: #d1d5db; }
 .breadcrumb-current { color: #111827; font-weight: 500; }
@@ -617,6 +618,148 @@ body {
 /* ── Utilities ── */
 .hidden { display: none !important; }
 
+/* ═════════════════════════════════════════════════════════════
+   OTA firmware dashboard
+═════════════════════════════════════════════════════════════ */
+.service-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+}
+.service-dot { width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; }
+.service-indicator.online { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.service-indicator.online .service-dot { background: #10b981; }
+.service-indicator.offline { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+.service-indicator.offline .service-dot { background: #ef4444; }
+
+.page-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.ota-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) minmax(420px, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+.form-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.form-field > span {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.file-input {
+  width: 100%;
+  padding: 7px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  color: #374151;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+.file-input::file-selector-button {
+  margin-right: 9px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 4px;
+  color: #4338ca;
+  background: #ede9fe;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ota-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ota-action-row { display: flex; align-items: center; gap: 10px; }
+.field-help { color: #9ca3af; font-size: 11px; line-height: 1.45; }
+.field-help code { color: #6b7280; }
+
+.build-log-card { display: flex; flex-direction: column; min-height: 320px; }
+.build-terminal {
+  flex: 1;
+  min-height: 270px;
+  max-height: 420px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 0;
+  background: #111827;
+  color: #d1fae5;
+  font: 12px/1.6 Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.status-uploading, .status-queued, .status-pending { background: #fef3c7; color: #92400e; }
+.status-building, .status-downloading, .status-verifying, .status-installing, .status-rebooting, .status-updating { background: #dbeafe; color: #1d4ed8; }
+.status-success, .status-ready, .status-online, .status-updated { background: #d1fae5; color: #047857; }
+.status-failed, .status-offline { background: #fee2e2; color: #b91c1c; }
+.status-unknown, .status-idle { background: #f3f4f6; color: #6b7280; }
+
+.ota-table-card { margin-top: 14px; }
+.table-scroll { width: 100%; overflow-x: auto; }
+.ota-table { min-width: 980px; }
+.ota-table td { white-space: nowrap; }
+.ota-table .filename-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.table-empty { padding: 28px 16px !important; color: #9ca3af !important; text-align: center !important; }
+.muted-count { color: #9ca3af; font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.row-actions { display: flex; align-items: center; gap: 5px; }
+.action-link { display: inline-flex; text-decoration: none; }
+.error-text { color: #dc2626 !important; }
+
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+.empty-state { padding: 26px; color: #6b7280; font-size: 13px; text-align: center; }
+.device-card { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.device-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.device-card-header h2 { margin-bottom: 2px; color: #111827; font-size: 15px; font-weight: 600; }
+.device-card-header code { color: #6b7280; font-size: 11px; }
+.device-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 14px; }
+.device-meta div { min-width: 0; }
+.device-meta dt { margin-bottom: 2px; color: #9ca3af; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.device-meta dd { color: #374151; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.ota-progress-block { padding: 10px; border: 1px solid #e5e7eb; border-radius: 5px; background: #f9fafb; }
+.ota-progress { background: linear-gradient(90deg, #6366f1, #3b82f6); }
+.device-error { margin-top: 7px; font-size: 11px; }
+
+.ota-dialog { width: min(620px, calc(100vw - 32px)); }
+.deploy-dialog { width: min(430px, calc(100vw - 32px)); }
+.dialog-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dialog-title-row h2 { color: #111827; font-size: 16px; font-weight: 600; }
+.detail-list { display: flex; flex-direction: column; border: 1px solid #e5e7eb; border-radius: 5px; overflow: hidden; }
+.detail-list > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); border-bottom: 1px solid #f3f4f6; }
+.detail-list > div:last-child { border-bottom: 0; }
+.detail-list dt, .detail-list dd { padding: 7px 9px; font-size: 11.5px; }
+.detail-list dt { background: #f9fafb; color: #6b7280; font-weight: 600; }
+.detail-list dd { color: #374151; overflow-wrap: anywhere; font-family: Consolas, "Courier New", monospace; }
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .report-layout { flex-direction: column; height: auto; }
@@ -624,6 +767,7 @@ body {
   .report-wrapper { min-height: 400px; height: 60vh; }
   .playground-controls { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .playground-output { grid-template-columns: 1fr; }
+  .ota-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .sidebar { width: 52px; }
@@ -631,4 +775,6 @@ body {
   .layout { margin-left: 52px; }
   .panels-row { flex-direction: column; }
   .playground-controls { grid-template-columns: 1fr; }
+  .service-indicator { display: none; }
+  .ota-form-row, .device-meta { grid-template-columns: 1fr; }
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CSV Profiler</title>
+  <title>CSV Profiler &amp; OTA</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -14,20 +14,28 @@
   <aside class="sidebar">
     <div class="sidebar-logo">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-      <span>DataProfiler</span>
+      <span>Data &amp; Firmware</span>
     </div>
     <nav class="sidebar-nav">
       <a href="#" class="nav-item active" id="nav-profiler">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        <span>Profiler</span>
+        <span>CSV Profiler</span>
       </a>
       <a href="#" class="nav-item" id="nav-runs">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span>Runs</span>
+        <span>CSV Runs</span>
       </a>
-      <a href="#" class="nav-item nav-item-disabled" id="nav-settings" aria-disabled="true" title="Settings are not available yet">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-        <span>Settings</span>
+      <a href="#" class="nav-item" id="nav-ota">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4H9z"/><path d="M7 7h10v5a5 5 0 0 1-10 0z"/><path d="M12 17v4"/><path d="M9 21h6"/></svg>
+        <span>OTA Firmware</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-devices">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 6h6M9 10h6M12 17h.01"/></svg>
+        <span>Devices</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-builds">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>Build History</span>
       </a>
     </nav>
   </aside>
@@ -37,11 +45,14 @@
 
     <header class="topbar">
       <div class="topbar-breadcrumb">
-        <span class="breadcrumb-root">CSV Profiler</span>
+        <span class="breadcrumb-root" id="breadcrumb-root">Dashboard</span>
         <span class="breadcrumb-sep">›</span>
-        <span class="breadcrumb-current">EDA Report</span>
+        <span class="breadcrumb-current" id="breadcrumb-current">CSV Profiler</span>
       </div>
       <div class="topbar-actions">
+        <span class="service-indicator" id="ota-service-indicator" title="Rust OTA service status">
+          <span class="service-dot"></span> OTA checking
+        </span>
         <button class="btn-sm" id="new-analysis" style="display:none;">+ New Run</button>
       </div>
     </header>
@@ -276,7 +287,130 @@
 
       </section>
 
+      <!-- OTA Firmware -->
+      <section id="ota-section" class="hidden">
+        <div class="page-title page-title-row">
+          <div>
+            <h1>OTA Firmware</h1>
+            <p class="page-subtitle">Compose managed device applications or build standalone ESP-IDF projects.</p>
+          </div>
+          <button class="btn-sm" id="ota-refresh">Refresh</button>
+        </div>
+
+        <div class="ota-grid">
+          <div class="card">
+            <div class="card-header">Firmware Project</div>
+            <div class="card-body">
+              <label class="form-field">
+                <span>Managed application or standalone Rust project (.zip)</span>
+                <input id="ota-project-input" class="file-input" type="file" accept=".zip,application/zip" />
+              </label>
+              <div class="ota-form-row">
+                <label class="form-field">
+                  <span>Target board</span>
+                  <select id="ota-target" class="pg-input">
+                    <option value="esp32s3">ESP32-S3</option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span>Firmware version</span>
+                  <input id="ota-version" class="pg-input" placeholder="1.0.1" autocomplete="off" />
+                </label>
+              </div>
+              <div class="ota-action-row">
+                <button id="ota-build-btn" class="btn-primary">Upload &amp; Build</button>
+                <span id="ota-build-state" class="status-badge status-idle">Idle</span>
+              </div>
+              <!-- <p class="field-help">Managed ZIPs use <code>src/main.rs</code> with plain <code>setup</code> and <code>main</code> functions. The server attaches them to the stable Wi-Fi/OTA runtime. Other Cargo projects use legacy standalone mode. Builds execute project <code>build.rs</code> and dependency code; upload trusted projects only.</p> -->
+            </div>
+          </div>
+
+          <div class="card build-log-card">
+            <div class="card-header sessions-header">
+              <span>Build Log</span>
+              <span id="ota-build-id" class="session-id-chip">No active build</span>
+            </div>
+            <pre id="ota-build-log" class="build-terminal" aria-live="polite">Waiting for a firmware build...</pre>
+          </div>
+        </div>
+
+        <div class="card ota-table-card">
+          <div class="card-header sessions-header">
+            <span>Firmware Library</span>
+            <span id="firmware-count" class="muted-count">0 images</span>
+          </div>
+          <div class="table-scroll">
+            <table class="sessions-table ota-table" id="firmware-table">
+              <thead><tr><th>Version</th><th>Target</th><th>Build ID</th><th>Filename</th><th>Size</th><th>SHA256</th><th>Created</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="firmware-tbody"><tr><td colspan="9" class="table-empty">Loading firmware...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Devices -->
+      <section id="devices-section" class="hidden">
+        <div class="page-title page-title-row">
+          <div>
+            <h1>ESP32 Devices</h1>
+            <p class="page-subtitle">Registered devices, desired firmware, and live OTA progress.</p>
+          </div>
+          <button class="btn-sm" id="devices-refresh">Refresh</button>
+        </div>
+        <div id="devices-empty" class="card empty-state hidden">
+          No devices are registered yet. Devices appear here after <code>POST /api/ota/devices/register</code>.
+        </div>
+        <div id="device-grid" class="device-grid"></div>
+      </section>
+
+      <!-- Build History -->
+      <section id="builds-section" class="hidden">
+        <div class="page-title page-title-row">
+          <div>
+            <h1>Build History</h1>
+            <p class="page-subtitle">Every queued, successful, and failed firmware build with full compiler logs.</p>
+          </div>
+          <button class="btn-sm" id="builds-refresh">Refresh</button>
+        </div>
+        <div class="card">
+          <div class="table-scroll">
+            <table class="sessions-table ota-table">
+              <thead><tr><th>Created</th><th>Project</th><th>Version</th><th>Target</th><th>Build ID</th><th>Status</th><th>Exit</th><th></th></tr></thead>
+              <tbody id="builds-tbody"><tr><td colspan="8" class="table-empty">Loading builds...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
     </main>
+  </div>
+
+  <!-- OTA details modal -->
+  <div id="ota-detail-overlay" class="confirm-overlay hidden">
+    <div class="confirm-dialog ota-dialog">
+      <div class="dialog-title-row">
+        <h2>Firmware Details</h2>
+        <button class="btn-ghost-sm" id="ota-detail-close">✕</button>
+      </div>
+      <div id="ota-detail-body" class="detail-list"></div>
+    </div>
+  </div>
+
+  <!-- Deploy modal -->
+  <div id="deploy-overlay" class="confirm-overlay hidden">
+    <div class="confirm-dialog deploy-dialog">
+      <div class="dialog-title-row">
+        <h2>Deploy OTA</h2>
+        <button class="btn-ghost-sm" id="deploy-close">✕</button>
+      </div>
+      <label class="form-field"><span>Device</span><select id="deploy-device" class="pg-input"></select></label>
+      <label class="form-field"><span>Firmware</span><select id="deploy-firmware" class="pg-input"></select></label>
+      <p class="field-help">The device will receive the instruction on its next update check and download from the configured LAN URL.</p>
+      <div class="confirm-actions">
+        <button id="deploy-submit" class="btn-primary">Deploy OTA</button>
+        <button id="deploy-cancel" class="btn-sm">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- Confirm modal -->
@@ -294,5 +428,6 @@
   <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 
   <script src="app.js"></script>
+  <script src="ota.js"></script>
 </body>
 </html>

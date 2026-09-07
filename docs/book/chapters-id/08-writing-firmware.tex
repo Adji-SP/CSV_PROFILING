@@ -1,0 +1,163 @@
+\chapter{Menulis Firmware Upload Pertama}
+
+\section{Salin contoh kecil sebelum memulai dari halaman kosong}
+
+Buka \codepath{examples/uploaded-firmware-basic}. Isinya hanya bagian yang diharapkan server:
+
+\begin{lstlisting}[numbers=none]
+Cargo.toml
+ota-app.toml
+src/
+  main.rs
+\end{lstlisting}
+
+Salin folder ini ke tempat yang aman, lalu berikan nama baru kepada package Cargo. Memulai dari contoh yang bekerja membuat Anda dapat mengubah satu gagasan setiap kali.
+
+Descriptor memberi tahu Axum cara memperlakukan proyek:
+
+\begin{lstlisting}[language=TOML,numbers=none]
+schema_version = 1
+application_api_version = 2
+entrypoint = "src/main.rs"
+\end{lstlisting}
+
+Biarkan nilai-nilai tersebut tetap seperti itu untuk aplikasi pertama.
+
+\section{Program Anda tetap terasa seperti main.rs}
+
+Buka \codepath{src/main.rs}. Tidak ada application class dan tidak ada framework trait yang wajib diimplementasikan. Anda menulis dua fungsi public.
+
+\begin{lstlisting}[language=Rust]
+use anyhow::Result;
+use firmware_app_api::AppContext;
+
+pub fn setup(context: &mut AppContext) -> Result<u64> {
+    log::info!("Hello from {}", context.device.device_id);
+    Ok(0)
+}
+
+pub fn main(context: AppContext, mut count: u64) -> Result<()> {
+    loop {
+        count += 1;
+        log::info!(
+            "count={count}, wifi={}",
+            context.network.is_connected()
+        );
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+}
+\end{lstlisting}
+
+\codepath{setup} berjalan satu kali setelah runtime menyiapkan board. \codepath{main} adalah loop aplikasi yang berumur panjang. Entrypoint stabil memanggil keduanya untuk Anda.
+
+Ubah pesan hello. Satu baris itu sudah cukup untuk build pertama yang terasa milik Anda sendiri.
+
+\section{Nilai antara setup dan main adalah kotak perkakas}
+
+Contoh mengembalikan sebuah angka dari setup, lalu menerimanya sebagai \codepath{count} di main. Angka itu adalah state aplikasi.
+
+State milik Anda dapat sesederhana \codepath{()} jika tidak ada apa pun yang perlu dibawa. State juga dapat berupa struct yang menyimpan driver sensor, counter, buffer, atau keadaan layar.
+
+\begin{lstlisting}[language=Rust]
+pub struct State {
+    sample_number: u64,
+    alarm_enabled: bool,
+}
+
+pub fn setup(context: &mut AppContext) -> Result<State> {
+    log::info!("Preparing peripherals for {}", context.device.name);
+    Ok(State {
+        sample_number: 0,
+        alarm_enabled: true,
+    })
+}
+
+pub fn main(context: AppContext, mut state: State) -> Result<()> {
+    loop {
+        state.sample_number += 1;
+        // Read the sensor and do your real work here.
+    }
+}
+\end{lstlisting}
+
+State ini hanyalah data Rust biasa. Sistem OTA tidak meminta bentuk class tertentu.
+
+\section{Ambil peripheral saat setup}
+
+Misalkan aplikasi membutuhkan I2C0 dan beberapa pin. Bagian awalnya dapat berbentuk seperti ini:
+
+\begin{lstlisting}[language=Rust]
+use anyhow::{Context, Result};
+
+pub fn setup(context: &mut AppContext) -> Result<State> {
+    let pins = context.peripherals.pins.take()
+        .context("GPIO pins were already taken")?;
+    let i2c0 = context.peripherals.i2c0.take()
+        .context("I2C0 was already taken")?;
+
+    // Construct the ESP-IDF I2C driver and sensor here.
+    // Return the finished driver inside State.
+}
+\end{lstlisting}
+
+Panggilan \codepath{take()} memindahkan sumber daya tersebut ke kode Anda. Jika setup menerima sumber daya yang sudah tidak ada, ia mengembalikan kesalahan yang dapat dibaca. Pada image OTA yang baru, kesalahan itu dapat memicu rollback.
+
+Tempatkan pembuatan driver yang mungkin gagal dan pemeriksaan startup singkat di setup. Jangan biarkan setup berputar selamanya. Runtime memerlukan jawaban sukses atau gagal yang jelas sebelum menyetujui slot baru.
+
+\begin{warningbox}
+Kembalikan state yang dimiliki aplikasi dari setup. Referensi yang dipinjam dari \codepath{AppContext} tidak dapat hidup dengan aman setelah panggilan setup mutable berakhir dan context dipindahkan ke main. Driver ESP-IDF nyata mungkin memerlukan lifetime dan type alias yang teliti. Ikuti contoh crate driver untuk chip serta pin yang Anda gunakan.
+\end{warningbox}
+
+\section{Tambahkan library Cargo biasa}
+
+Ya, aplikasi upload dapat memakai library. Buka \codepath{examples/uploaded-firmware-with-libs/Cargo.toml}:
+
+\begin{lstlisting}[language=TOML,numbers=none]
+[dependencies]
+anyhow = "1"
+firmware-app-api = "0.1"
+heapless = "0.8"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+\end{lstlisting}
+
+Contoh tersebut menyimpan sampel di dalam antrean berkapasitas tetap dan mengubah telemetry menjadi JSON. Driver sensor, helper \codepath{embedded-hal}, koleksi ringkas, dan crate serialisasi dapat dipakai dengan cara serupa.
+
+Library harus mendukung \codepath{xtensa-esp32s3-espidf}. Crate desktop yang menganggap mouse, filesystem, atau sistem operasi penuh selalu tersedia mungkin sulit dikompilasi atau memang tidak masuk akal di board. Baca contoh dan daftar feature milik crate tersebut.
+
+Jika memakai local path dependency, masukkan seluruh foldernya ke dalam ZIP. Path harus tetap berada di bawah root proyek upload. Axum menolak path yang mencoba keluar dari arsip.
+
+\begin{mentorbox}[Mengapa firmware-app-api tampak seperti dependensi biasa]
+Manifest upload memakai \codepath{firmware-app-api = "0.1"} sebagai placeholder yang mudah dibawa. Di dalam salinan build privat, Axum mengarahkan nama itu ke API crate yang cocok di runtime stabil. Manifest asli Anda dibiarkan tetap utuh.
+\end{mentorbox}
+
+\section{Berikan versi yang berguna kepada rilis}
+
+Versi yang diketik di dashboard menjadi versi firmware yang dikompilasi ke managed runtime dan disimpan di SQLite. Mulailah dengan urutan tenang seperti \codepath{1.0.0}, \codepath{1.0.1}, lalu \codepath{1.1.0}.
+
+Deployment memilih firmware ID tertentu. Server saat ini memeriksa apakah desired version sama dengan current version perangkat. Server belum mengurutkan semantic version dan memilih rilis secara otomatis.
+
+\section{Zip isinya, jangan rak luarnya}
+
+Di Windows PowerShell:
+
+\begin{lstlisting}
+Compress-Archive \
+  -Path examples\uploaded-firmware-basic\* \
+  -DestinationPath uploaded-firmware-basic.zip
+\end{lstlisting}
+
+Di Linux atau macOS:
+
+\begin{lstlisting}
+cd examples/uploaded-firmware-basic
+zip -r ../../uploaded-firmware-basic.zip \
+  Cargo.toml ota-app.toml src README.md
+\end{lstlisting}
+
+Buka ZIP dan lihat tingkat pertamanya. \codepath{Cargo.toml}, \codepath{ota-app.toml}, dan \codepath{src} harus langsung terlihat. Upload ZIP itu di OTA Firmware. Perangkat kelak menerima \codepath{.bin}, tidak pernah ZIP ini.
+
+\begin{checkpoint}
+Buat salinan contoh basic. Ubah nama package dan pesan hello. Biarkan setup mengembalikan state struct kecil buatan Anda. Zip isinya lalu upload sebagai versi \codepath{1.0.1}. Respons upload seharusnya menyebut \codepath{managed_application}, API versi 2, dan \codepath{src/main.rs}.
+\end{checkpoint}

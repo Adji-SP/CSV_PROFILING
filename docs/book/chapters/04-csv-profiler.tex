@@ -1,0 +1,130 @@
+\chapter{Follow One CSV File}
+
+\section{Make a tiny file we can understand by sight}
+
+Create \codepath{sensor-readings.csv} with these four rows:
+
+\begin{lstlisting}[numbers=none]
+device,temperature,room
+alpha,24.7,lab
+beta,,office
+alpha,24.7,lab
+gamma,31.2,workshop
+\end{lstlisting}
+
+We already know its secrets. One temperature is missing. The alpha row is repeated. The workshop is warmer than the other rooms. A tiny file lets us check whether the report is telling the truth.
+
+Open CSV Profiler, choose the file, and press Run Profiling. Keep \codepath{python/profiler_server.py} open while the progress screen moves.
+
+\section{The upload route receives the envelope}
+
+Search the Python file for \codepath{@app.route("/upload")}. Flask calls the function below that line when the browser posts a file.
+
+Read the first checks as ordinary questions:
+
+\begin{lstlisting}[language=Python]
+if "file" not in request.files:
+    return jsonify({"error": "No file provided"}), 400
+
+if not f.filename.lower().endswith(".csv"):
+    return jsonify({"error": "Only CSV files are supported"}), 400
+\end{lstlisting}
+
+If the envelope contains a CSV, Flask gives the job a random ID and saves a working copy. Your original filename goes into the session notes; the stored filename uses the random ID so two people can upload \codepath{data.csv} without choosing the same path.
+
+The route then starts \codepath{run_profiling} on a background thread and answers the browser with the job ID.
+
+\begin{mentorbox}[Why answer before the report is finished?]
+A full profile can take time. If one browser request waits silently for the whole job, the page feels frozen. Returning the job ID gives the browser something to follow while Python continues its work.
+\end{mentorbox}
+
+\section{Progress arrives like notes under a door}
+
+Every running job has a small Python queue. The profiler places progress messages into it. The route \codepath{/progress/<job-id>} waits for those messages and sends them to the browser as they arrive.
+
+This one-way stream is called server-sent events, usually shortened to SSE. The name matters less than the picture: Python writes short notes; the browser reads them without asking the same question again and again.
+
+\begin{lstlisting}[language=Python]
+def generate():
+    while True:
+        message = q.get()
+        if message is None:
+            break
+        yield message
+\end{lstlisting}
+
+When the queue receives \codepath{None}, the stream closes. The browser then opens the finished report.
+
+\section{Where the report sleeps}
+
+Flask stores the report HTML in \codepath{python/reports}. Beside it sits a JSON sidecar. Think of the sidecar as the label on a folder: original filename, job ID, creation time, report address, row count, and column count.
+
+Previous Runs reads those labels through \codepath{GET /sessions}. A browser refresh does not erase the session because the important details live on disk, not only in JavaScript memory.
+
+These routes form the small session shelf:
+
+\begin{longtable}{p{0.15\textwidth}p{0.34\textwidth}p{0.41\textwidth}}
+\toprule
+Method & Route & What you receive\\
+\midrule
+\endhead
+GET & \codepath{/sessions} & All report sessions Flask can still find.\\
+GET & \codepath{/session/<job-id>} & The notes for one saved session.\\
+GET & \codepath{/report/<job-id>} & The generated HTML report.\\
+DELETE & \codepath{/reset/<job-id>} & Removal of one session and its working files.\\
+DELETE & \codepath{/reset-all} & Removal of all local CSV sessions.\\
+\bottomrule
+\end{longtable}
+
+\section{Clean a copy, then look again}
+
+Return to our four-row file. Ask the cleaning panel to remove duplicates and fill the missing temperature with the median. When you apply the choices, the browser posts a JSON description to \codepath{/clean/<job-id>}.
+
+The idea resembles this:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "drop_duplicates": true,
+  "missing": {
+    "temperature": "fill_median"
+  }
+}
+\end{lstlisting}
+
+Pandas opens the current working data, applies those choices, and writes \codepath{<job-id>_cleaned.csv}. The original upload remains available. Flask refreshes the report notes and gives the browser a download address.
+
+Open the cleaned CSV. You should see three data rows and no empty temperature. Since \codepath{24.7} appears twice in the original values, the median fill should also be \codepath{24.7}.
+
+\section{Use the playground as a scratch pad}
+
+The playground runs one small Pandas idea at a time. Start with Preview, Head, Tail, Describe, or Value Counts. Those choices do not change the saved data.
+
+For example, this request asks for the ten rows with the largest temperature values:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "operation": "sort_values",
+  "column": "temperature",
+  "limit": 10,
+  "mutate": false
+}
+\end{lstlisting}
+
+The word \codepath{mutate} means ``change the working data.'' The dashboard only sends \codepath{true} after you press the explicit mutation action for operations such as rename, fill, drop, type conversion, or setting a cell.
+
+The route clamps the row limit between 1 and 500. That keeps an accidental giant preview from overwhelming the page.
+
+\section{How to add a CSV feature without hurting OTA}
+
+Put new data operations in the Flask route or a Python helper. Add the matching control to \codepath{index.html} and its behavior to \codepath{app.js}. Keep its requests on \codepath{API_BASE}.
+
+Likewise, an OTA feature belongs in Axum and \codepath{ota.js}. The two workbenches may share the front desk, but neither needs to borrow the other's tools.
+
+\begin{warningbox}
+Do not rename the existing CSV routes while adding firmware features. Saved frontend behavior already depends on those addresses. Small additions around the working flow are safer than rewriting it.
+\end{warningbox}
+
+\begin{checkpoint}
+Profile the four-row file, remove its duplicate, fill the missing temperature, and download the result. Refresh the browser and recover the session from Previous Runs. Then explain why the report survives even though JavaScript memory was refreshed.
+\end{checkpoint}
+

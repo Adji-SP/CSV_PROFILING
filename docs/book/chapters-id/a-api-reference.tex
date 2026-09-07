@@ -1,0 +1,248 @@
+\chapter{Referensi HTTP API}
+
+Lampiran ini adalah referensi di samping meja. Anda tidak perlu membacanya dari awal sampai akhir sebelum memakai proyek. Kembalilah ke sini ketika sedang menulis request, memeriksa nama field, atau mencari tahu layanan mana yang memiliki sebuah alamat. Cerita di balik panggilan ini berada pada Bab 3 sampai Bab 9.
+
+\section{Konvensi}
+
+Dashboard memakai JSON untuk request dan response biasa, multipart form data untuk upload proyek, server-sent events untuk progress CSV, HTML untuk laporan profiling, dan raw octet stream untuk download firmware.
+
+Kegagalan OTA memakai amplop yang sama:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "success": false,
+  "error": {
+    "code": "TARGET_MISMATCH",
+    "message": "Device chip does not match firmware target",
+    "details": "optional diagnostic detail",
+    "hint": "optional corrective action"
+  }
+}
+\end{lstlisting}
+
+Field tanpa nilai dapat dihilangkan. Semua ID berupa string UUID kecuali \codepath{device_id}, yang dipilih melalui konfigurasi atau diturunkan dari station MAC.
+
+\section{Indeks endpoint OTA}
+
+{\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.1\textwidth}>{\raggedright\arraybackslash}p{0.52\textwidth}Y}
+\toprule
+Metode & Endpoint & Kegunaan\\
+\midrule
+GET & \codepath{/api/ota/status} & Kesehatan layanan dan public URL\\
+GET & \codepath{/api/ota/projects} & Daftar proyek yang sudah di-upload\\
+POST & \codepath{/api/ota/projects} & Upload sebuah ZIP proyek\\
+POST & \codepath{/api/ota/projects/<project-id>/build} & Masukkan build ke antrean\\
+GET & \codepath{/api/ota/builds} & Daftar riwayat build\\
+GET & \codepath{/api/ota/builds/<build-id>} & Status build dan log lengkap\\
+GET & \codepath{/api/ota/firmware} & Daftar firmware siap pakai\\
+GET & \codepath{/api/ota/firmware/latest?target=esp32s3} & Image siap pakai terbaru untuk target\\
+GET & \codepath{/api/ota/firmware/<firmware-id>} & Rincian firmware\\
+GET & \codepath{/api/ota/firmware/<firmware-id>/download} & Stream application image\\
+DELETE & \codepath{/api/ota/firmware/<firmware-id>} & Hapus image yang tidak dirujuk\\
+GET & \codepath{/api/ota/devices} & Daftar perangkat terdaftar\\
+POST & \codepath{/api/ota/devices/register} & Buat atau perbarui perangkat\\
+POST & \codepath{/api/ota/devices/<device-id>/heartbeat} & Segarkan keadaan perangkat\\
+POST & \codepath{/api/ota/devices/<device-id>/deploy} & Pilih firmware yang diinginkan\\
+GET & \codepath{/api/ota/devices/<device-id>/update} & Polling firmware yang diinginkan\\
+POST & \codepath{/api/ota/devices/<device-id>/ota-status} & Laporkan progress atau hasil OTA\\
+\bottomrule
+\end{tabularx}
+}
+
+\section{Status}
+
+\textbf{GET \codepath{/api/ota/status}} mengembalikan 200.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "service": "CSV_PROFILING OTA Server",
+  "language": "rust",
+  "status": "online",
+  "version": "0.1.0",
+  "public_base_url": "http://192.168.1.5:7000",
+  "supported_targets": ["esp32s3"]
+}
+\end{lstlisting}
+
+\section{Project dan build}
+
+\textbf{POST \codepath{/api/ota/projects}} mengharapkan field multipart \codepath{project}, \codepath{target}, dan \codepath{version}. Upload yang berhasil mengembalikan 201.
+
+\begin{lstlisting}[numbers=none]
+curl -F "project=@uploaded-firmware-basic.zip" \
+  -F "target=esp32s3" -F "version=1.0.1" \
+  http://localhost:7000/api/ota/projects
+\end{lstlisting}
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "project_id": "55e4...",
+  "name": "uploaded-firmware-basic",
+  "target": "esp32s3",
+  "version": "1.0.1",
+  "status": "uploaded",
+  "project_type": "managed_application",
+  "application_api_version": 2,
+  "entrypoint": "src/main.rs"
+}
+\end{lstlisting}
+
+Upload standalone tidak membawa API version dan entrypoint. Nilai \codepath{project_type}-nya adalah \codepath{standalone}.
+
+\textbf{GET \codepath{/api/ota/projects}} mengembalikan array catatan project. Path filesystem internal tidak ikut diserialisasi.
+
+\textbf{POST \codepath{/api/ota/projects/<project-id>/build}} mengembalikan 202:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{"build_id":"a8c4...","status":"building"}
+\end{lstlisting}
+
+Baris permanen dimulai dengan status queued, lalu coordinator task mengubahnya menjadi building. Hanya satu build queued atau aktif yang diizinkan bagi satu proyek.
+
+\textbf{GET \codepath{/api/ota/builds}} mengembalikan seluruh build, dimulai dari yang terbaru. \textbf{GET \codepath{/api/ota/builds/<build-id>}} mengembalikan satu respons berbentuk:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "build_id": "a8c4...",
+  "project_id": "55e4...",
+  "project_name": "uploaded-firmware-basic",
+  "target": "esp32s3",
+  "version": "1.0.1",
+  "status": "success",
+  "logs": ["Build queued", "Build started", "Tooling: cargo ..."],
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-09-07T10:00:00Z",
+  "finished_at": "2026-09-07T10:02:00Z",
+  "created_at": "2026-09-07T09:59:59Z"
+}
+\end{lstlisting}
+
+Respons gagal dapat memuat \codepath{hint}.
+
+\section{Firmware}
+
+Route list, detail, dan latest mengembalikan bentuk firmware yang sama:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "firmware_id": "c53b...",
+  "project_id": "55e4...",
+  "build_id": "a8c4...",
+  "project": "uploaded-firmware-basic",
+  "target": "esp32s3",
+  "version": "1.0.1",
+  "filename": "firmware-uploaded-firmware-basic-v1.0.1-a8c4.bin",
+  "size": 945332,
+  "sha256": "f2534c...",
+  "status": "ready",
+  "created_at": "2026-09-07T10:02:00Z",
+  "download_url": "http://192.168.1.5:7000/api/ota/firmware/c53b.../download"
+}
+\end{lstlisting}
+
+\textbf{GET \codepath{/download}} mengembalikan \codepath{application/octet-stream}, content length, attachment disposition, dan \codepath{X-Firmware-SHA256}. Route menyusun kembali path dari build directory yang dikonfigurasi dan filename yang tersimpan, lalu melakukan canonicalization sebelum membuka berkas.
+
+\textbf{DELETE \codepath{/api/ota/firmware/<firmware-id>}} mengembalikan 204. Respons berubah menjadi 409 ketika perangkat atau deployment masih merujuk image tersebut.
+
+\section{Perangkat dan deployment}
+
+\textbf{POST \codepath{/api/ota/devices/register}} mengembalikan 201 bersama catatan perangkat saat ini.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "device_id": "ESP32-S3-001",
+  "name": "Sensor Node 1",
+  "chip": "esp32s3",
+  "current_version": "1.0.0",
+  "ip_address": "192.168.1.24"
+}
+\end{lstlisting}
+
+\textbf{POST \codepath{/api/ota/devices/ESP32-S3-001/heartbeat}} mengembalikan 200 bersama perangkat yang telah diperbarui.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "current_version": "1.0.0",
+  "status": "online",
+  "ip_address": "192.168.1.24"
+}
+\end{lstlisting}
+
+Status heartbeat yang diizinkan adalah online, offline, updating, rebooting, updated, failed, dan unknown.
+
+\textbf{GET \codepath{/api/ota/devices}} mengembalikan catatan dengan field publik berikut:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "device_id": "ESP32-S3-001",
+  "name": "Sensor Node 1",
+  "chip": "esp32s3",
+  "ip_address": "192.168.1.24",
+  "current_version": "1.0.0",
+  "desired_version": "1.0.1",
+  "desired_firmware_id": "c53b...",
+  "status": "online",
+  "ota_status": "pending",
+  "ota_progress": 0,
+  "ota_error": null,
+  "last_seen": "2026-09-07T10:03:00Z"
+}
+\end{lstlisting}
+
+\textbf{POST \codepath{/api/ota/devices/<device-id>/deploy}} mengharapkan firmware ID dan mengembalikan 202.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{"firmware_id":"c53b..."}
+\end{lstlisting}
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "deployment_id": "d911...",
+  "device_id": "ESP32-S3-001",
+  "firmware_id": "c53b...",
+  "desired_version": "1.0.1",
+  "status": "pending"
+}
+\end{lstlisting}
+
+\textbf{GET \codepath{/api/ota/devices/<device-id>/update}} mengembalikan \codepath{update_available: false} atau manifest yang diperlihatkan pada Bab 9.
+
+\textbf{POST \codepath{/api/ota/devices/<device-id>/ota-status}} menerima:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "status": "downloading",
+  "progress": 35,
+  "current_version": null,
+  "error": null
+}
+\end{lstlisting}
+
+Keadaan OTA yang diizinkan adalah idle, pending, downloading, verifying, installing, rebooting, success, dan failed. Progress harus berada antara 0 dan 100. Status failed mewajibkan error. Status success memakai 100 sebagai nilai bawaan dan mengosongkan desired firmware setelah current version diperbarui.
+
+\section{Indeks endpoint CSV}
+
+Route berikut dimiliki Flask pada port 5000.
+
+\begin{longtable}{p{0.13\textwidth}p{0.38\textwidth}p{0.39\textwidth}}
+\toprule
+Metode & Endpoint & Kegunaan\\
+\midrule
+\endhead
+GET & \codepath{/} & Sajikan HTML dashboard\\
+POST & \codepath{/upload} & Terima field multipart CSV \codepath{file} dan kembalikan \codepath{job_id}\\
+GET & \codepath{/progress/<job-id>} & Stream progress profiling dengan SSE\\
+GET & \codepath{/report/<job-id>} & Sajikan HTML laporan yang dihasilkan\\
+GET & \codepath{/sessions} & Daftar sesi laporan yang disimpan\\
+GET & \codepath{/session/<job-id>} & Periksa dan pulihkan satu sesi\\
+POST & \codepath{/clean/<job-id>} & Terapkan kontrol cleaning dan perbarui metadata\\
+POST & \codepath{/playground/<job-id>} & Jalankan preview, analisis, chart, atau mutasi yang dipilih jelas\\
+GET & \codepath{/download-cleaned/<job-id>} & Download CSV yang sudah dibersihkan\\
+DELETE & \codepath{/reset/<job-id>} & Hapus satu sesi CSV\\
+DELETE & \codepath{/reset-all} & Hapus seluruh sesi CSV\\
+\bottomrule
+\end{longtable}
+
+Field request playground meliputi \codepath{operation}, \codepath{mutate}, \codepath{limit}, \codepath{column}, \codepath{column_2}, \codepath{value}, \codepath{operator}, \codepath{indexes}, dan \codepath{chart_type}. Endpoint membatasi nilai limit dari 1 sampai 500.

@@ -1,0 +1,107 @@
+\chapter{Konfigurasi, Perintah, dan Glosarium}
+
+Simpan lampiran ini di dekat terminal. Isinya mengumpulkan nama dan perintah yang mudah terlupa setelah gagasan besarnya sudah dipahami. Baca catatan pendek di sekitar perintah sebelum menyalinnya, terutama ketika hardware terhubung.
+
+\section{Environment variable}
+
+\begin{longtable}{>{\ttfamily\small}p{0.29\textwidth}p{0.22\textwidth}p{0.39\textwidth}}
+\toprule
+Variable & Nilai bawaan/contoh & Arti\\
+\midrule
+\endhead
+OTA\_BIND\_ADDRESS & \codepath{0.0.0.0} & Interface listener; akses LAN membutuhkan binding non-loopback.\\
+OTA\_PORT & \codepath{7000} & Port HTTP Axum.\\
+OTA\_PUBLIC\_BASE\_URL & terdeteksi atau ditulis & Base URL yang dimasukkan ke alamat firmware bagi perangkat. Gunakan alamat LAN PC.\\
+OTA\_PROJECT\_DIR & \codepath{firmware-projects} & Root aman bagi upload yang diekstrak.\\
+OTA\_BUILD\_DIR & \codepath{firmware-builds} & Root aman bagi application image yang dihasilkan.\\
+OTA\_DATA\_DIR & \codepath{data} & Folder yang memuat \codepath{ota.db}.\\
+OTA\_RUNTIME\_DIR & \codepath{examples/esp32-rust-ota-client} & Template runtime stabil untuk managed build.\\
+OTA\_MAX\_UPLOAD\_MB & \codepath{50} & Batas field proyek terkode dalam MiB.\\
+OTA\_MAX\_EXTRACTED\_MB & batas upload dikali 10 & Jumlah maksimum declared extracted content.\\
+OTA\_ALLOWED\_ORIGINS & localhost dan 127.0.0.1 pada port 5000 & Daftar origin browser yang diizinkan, dipisahkan koma.\\
+OTA\_RUST\_TOOLCHAIN & \codepath{esp} & Toolchain rustup untuk perintah builder; nilai kosong memakai default process.\\
+WIFI\_SSID & kosong & Nama jaringan Wi-Fi embedded yang dipakai saat managed build.\\
+WIFI\_PASS & kosong & Kata sandi Wi-Fi embedded. Simpan dalam \codepath{.env} lokal.\\
+DEVICE\_NAME & label managed-device & Nama ramah yang ditanam ke managed firmware.\\
+DEVICE\_ID & dari MAC bila kosong & Pengganti identitas stabil yang bersifat opsional.\\
+RUST\_LOG & info sebagai bawaan & Filter tracing Axum dan tower-http.\\
+\bottomrule
+\end{longtable}
+
+\section{Lembar perintah}
+
+\subsection{Menyalakan layanan}
+
+\begin{lstlisting}[numbers=none]
+# Windows
+.\run-dev.bat
+
+# Linux/macOS
+./run-dev.sh
+\end{lstlisting}
+
+\subsection{Menjalankan pemeriksaan server OTA}
+
+\begin{lstlisting}[numbers=none]
+cargo test --manifest-path ota-server/Cargo.toml
+cargo clippy --manifest-path ota-server/Cargo.toml --all-targets
+curl http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+\subsection{Memeriksa alat embedded}
+
+\begin{lstlisting}[numbers=none]
+cargo --version
+rustc +esp --version
+espflash --version
+rustc +esp --print target-list
+\end{lstlisting}
+
+\subsection{Membangun runtime stabil tanpa flashing}
+
+\begin{lstlisting}[numbers=none]
+cd examples/esp32-rust-ota-client
+cargo +esp build --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+\subsection{Membangun dan melakukan flash runtime stabil}
+
+\begin{lstlisting}[numbers=none]
+cargo +esp run --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+Pengaturan runner menentukan argumen \codepath{espflash} dan penggunaan tabel partisi. Periksa \codepath{.cargo/config.toml} pada proyek embedded sebelum flashing fisik.
+
+\section{Glosarium}
+
+\begin{description}
+  \item[Application image] Berkas \codepath{.bin} yang berisi satu aplikasi ESP-IDF dan cocok untuk partisi aplikasi OTA.
+  \item[Axum] Framework HTTP Rust yang dipakai layanan OTA.
+  \item[Build ID] UUID yang mengenali satu percobaan kompilasi beserta log permanennya.
+  \item[Cargo target] Arsitektur dan platform tujuan kompilasi sebuah crate Rust. Proyek ini dimulai dengan \codepath{xtensa-esp32s3-espidf}.
+  \item[CORS] Kebijakan browser yang mengatur origin halaman mana yang boleh memanggil OTA API.
+  \item[Deployment] Hubungan tersimpan yang menyatakan satu perangkat harus memasang satu catatan firmware.
+  \item[ELF] Format executable tertaut yang dipakai oleh \codepath{espflash save-image}.
+  \item[ESP-IDF] Framework pengembangan resmi Espressif dan kumpulan system service yang berada di bawah binding Rust.
+  \item[Firmware ID] UUID yang mengenali satu application image siap pakai beserta metadata-nya.
+  \item[Flask] Framework HTTP Python yang menyajikan dashboard dan CSV API.
+  \item[Heartbeat] Permintaan berkala dari perangkat untuk memperbarui versi, status, alamat IP, dan waktu last-seen.
+  \item[Inactive slot] Partisi aplikasi OTA yang sedang tidak dijalankan dan dapat menerima image baru dengan aman.
+  \item[Managed application] Package Rust berbasis fungsi yang di-upload lalu disatukan server dengan runtime stabil.
+  \item[NVS] Penyimpanan nonvolatile ESP-IDF yang biasa dipakai untuk pengaturan dan konfigurasi Wi-Fi.
+  \item[OTA] Pembaruan firmware melalui koneksi jaringan, singkatan dari over-the-air.
+  \item[Pull model] Perangkat melakukan polling untuk firmware yang diinginkan dan memulai download sendiri.
+  \item[Rollback] Bantuan bootloader untuk kembali ke slot aplikasi valid sebelumnya ketika image baru gagal melewati validasi startup.
+  \item[SHA-256] Hash yang dipakai untuk memastikan byte hasil download cocok dengan metadata server.
+  \item[SSE] Server-sent events, aliran HTTP satu arah untuk progress profiling CSV.
+  \item[Stable runtime] Kode platform yang pertama kali di-flash dan memiliki Wi-Fi, OTA, rollback, serta siklus hidup aplikasi.
+  \item[Standalone firmware] Proyek Cargo upload yang dibangun tanpa penyatuan managed runtime; proyek memiliki seluruh perilaku perangkatnya.
+  \item[WAL] Mode write-ahead logging SQLite yang membantu akses lokal secara bersamaan.
+  \item[ZIP slip] Path traversal dari arsip yang mencoba mengekstrak berkas keluar dari root tujuan.
+\end{description}
+
+\section{Batas implementasi saat ini}
+
+Versi pertama mendukung ESP32-S3, penyimpanan SQLite lokal, polling build log, HTTP biasa pada LAN yang dipercaya, local trusted build, dan pemeriksaan integritas SHA-256. Streaming terminal perangkat melalui serial atau jaringan, build Docker terisolasi, autentikasi multi-user, publisher signing, dan target chip tambahan adalah pekerjaan pengembangan yang dijelaskan pada Bab 12.
+
+Batas ini adalah garis desain yang terlihat. Pembaca pemula dapat membedakan fitur yang sudah dapat dipakai hari ini dari bagian yang masih membutuhkan rekayasa dan validasi hardware.

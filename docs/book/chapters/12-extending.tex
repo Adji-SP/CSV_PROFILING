@@ -1,0 +1,89 @@
+\chapter{Where You Can Take It Next}
+
+\section{Choose one seam and keep the rest quiet}
+
+The project is already divided along useful seams. A good extension changes the smallest responsible piece and lets its neighbors keep their familiar contracts.
+
+Before writing code, finish this sentence: ``The new behavior belongs to \underline{\hspace{4cm}} because that piece already owns \underline{\hspace{4cm}}.''
+
+If the answer is Wi-Fi credentials, open \codepath{wifi-manager}. If it is a new HTTP address, open \codepath{routes}. If it is a new build environment, open the \codepath{FirmwareBuilder} implementation.
+
+\section{Welcome another ESP32 chip}
+
+The current board list contains ESP32-S3. A second target needs more than another dropdown option.
+
+Add its accepted name in target validation. Give \codepath{TargetSpec} the proper Rust target and \codepath{espflash} chip. Add the board choice in the frontend. Then make a runtime peripheral split that matches the actual chip, partition example, and rollback configuration.
+
+An ESP32-C3, for example, uses RISC-V and does not offer the same hardware bundle as the S3. The application API should promise only resources the board truly has.
+
+Begin with a known-good empty application. Prove build and serial flash before testing OTA and rollback.
+
+\section{Turn Wi-Fi setup into a friendly first-run flow}
+
+The current manager receives credentials at build time and reconnects when needed. A future board could behave like a new home device:
+
+\begin{enumerate}
+  \item Look for saved credentials in NVS.
+  \item Try the saved network for a limited time.
+  \item Start its own temporary setup access point when no network works.
+  \item Show a small page where the owner chooses Wi-Fi.
+  \item Save the credentials and return to station mode.
+  \item Publish each change through the existing network handle.
+\end{enumerate}
+
+Keep the modem, event loop, NVS, and Wi-Fi service inside \codepath{wifi-manager}. The sensor application should not have to learn captive-portal code.
+
+\section{Bring the ESP32 terminal into the dashboard}
+
+There are two useful roads, and they show different parts of the journey.
+
+\subsection{Road one: a serial bridge on the PC}
+
+A small local service opens a selected COM or tty port, reads lines, and streams them to the browser with SSE or WebSocket. It can show bootloader messages, panics, and Wi-Fi failures before the network comes alive.
+
+The dashboard must ask the user which port to open. Only one reader should own that port. The bridge needs bounded memory, clean disconnects, and a visible warning when flashing cannot begin because monitoring still owns the serial connection.
+
+\subsection{Road two: logs sent over Wi-Fi}
+
+The runtime can gather structured log records, post small batches to Axum, and let the browser subscribe to a device stream. This works after the USB cable is gone. It cannot report a failure that prevents Wi-Fi from starting.
+
+A good dashboard labels each line as Serial or Network. The server also needs retention limits so a noisy loop cannot fill SQLite or memory.
+
+\begin{mentorbox}[What exists today]
+Neither device-log road is implemented in the current API. The existing dark terminal is only for PC build logs. Keeping that sentence visible prevents a mock terminal from being mistaken for hardware evidence.
+\end{mentorbox}
+
+\section{Move untrusted builds into a safer room}
+
+Today \codepath{LocalFirmwareBuilder} runs Cargo on the host PC. That is suitable for trusted local projects. Cargo can execute build scripts and procedural macros, so an unknown ZIP deserves a stronger boundary.
+
+The \codepath{FirmwareBuilder} trait leaves a doorway for \codepath{DockerFirmwareBuilder}. A careful container would use a pinned toolchain image, a read-only source mount, a small writable output folder, and limits for time, CPU, memory, processes, and logs. It would carry no host secrets.
+
+The coordinator can keep receiving the same log lines and final artifact. Routes and frontend polling do not need to learn how the build room changed.
+
+\section{Give firmware a real signature}
+
+Keep SHA-256 for transfer integrity. Add publisher proof as a separate layer built from supported signing tools and device trust anchors.
+
+The build system would sign an approved image or digest with a protected private key. Firmware metadata would carry the signature, algorithm, and key ID. The device would verify them before activating the slot. Key rotation and recovery need their own tested plan.
+
+Use ESP-IDF Secure Boot and signing guidance when moving toward production. A homemade shared-secret formula is too fragile for the job.
+
+\section{Let the API grow without surprising old projects}
+
+Managed uploads already declare \codepath{application_api_version = 2}. When the application contract changes, add or migrate versions deliberately. Give an old ZIP a clear rejection message and a short conversion example.
+
+Prefer adding fields that old code can ignore. Keep runtime and application API versions pinned together in the generated workspace. If public HTTP payloads need a breaking change, give the new contract a visible version boundary.
+
+\section{Test from the cheap layer toward the board}
+
+Start with unit tests for paths, versions, manifest reading, and status changes. Add integration tests around a temporary SQLite database and a fake builder. Check frontend navigation and failure states in the browser. Then run a known-good project through the real ESP toolchain.
+
+Physical tests come last because they take the most time and reveal a different class of problem. Test a successful update, unplugged network, interrupted download, wrong hash, power loss, setup failure, rollback, and repeated slot swapping.
+
+Write down which layers passed. ``The Rust tests pass'' and ``rollback worked on this board'' are different pieces of evidence.
+
+\begin{checkpoint}
+Pick one extension from this chapter. Fill in the ownership sentence at the beginning. Below it, draw the files you would touch, the new failure a learner would see, and the smallest test that proves the change without hardware. Add the physical test on the last line.
+\end{checkpoint}
+

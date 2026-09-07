@@ -1,0 +1,122 @@
+\chapter{Ketika Sesuatu Tidak Berjalan}
+
+\section{Duduk sebentar di langkah terakhir yang berhasil}
+
+Sebuah kesalahan lebih mudah dihadapi setelah diberi alamat. Ajukan satu pertanyaan: langkah terakhir mana yang benar-benar berhasil?
+
+Jika dashboard belum pernah terbuka, tetap periksa Flask. Jika CSV bekerja tetapi lampu OTA gelap, periksa Axum. Jika Axum menerima ZIP lalu Cargo gagal, baca build log. Jika PC dapat mengunduh binary tetapi board tidak dapat, periksa jaringan di antara keduanya.
+
+Kebiasaan ini memakai sepuluh detik dan sering menghemat satu jam.
+
+\section{Halaman dashboard tidak dapat dibuka}
+
+Lihat terminal Flask. Jika tertulis nama paket yang hilang, pasang \codepath{python/requirements.txt} ke dalam \codepath{python/.venv}. Setelah itu, coba:
+
+\begin{lstlisting}[numbers=none]
+http://127.0.0.1:5000/
+\end{lstlisting}
+
+Jika alamat tersebut terbuka, Flask sudah menyajikan halaman. Jika halaman tidak memiliki style atau tombol tidak bereaksi, buka \codepath{/style.css} dan \codepath{/app.js} pada port yang sama untuk memastikan kedua berkas ikut disajikan.
+
+Jangan membuka \codepath{index.html} dengan klik ganda. Halaman \codepath{file:///} yang dihasilkan hidup di dunia browser berbeda dari dashboard yang disajikan Flask.
+
+\section{CSV bekerja dan OTA mengatakan offline}
+
+Buka:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+Jika gagal, baca terminal Axum. Cargo mungkin masih mengompilasi. Konfigurasi mungkin berisi port atau URL yang salah. Program lain mungkin sudah memakai port 7000.
+
+Jika status dapat dibuka di tab tersendiri tetapi permintaan dashboard diblokir, buka panel Network di browser dan cari tulisan CORS. Bandingkan origin dashboard yang tepat dengan \codepath{OTA_ALLOWED_ORIGINS}.
+
+\section{ZIP ditolak di depan pintu}
+
+Baca isi error sebelum membungkus ulang apa pun. Biasanya pesannya menunjuk salah satu hal berikut:
+
+\begin{itemize}
+  \item berkas yang dipilih bukan ZIP;
+  \item \codepath{Cargo.toml} tidak ada;
+  \item \codepath{ota-app.toml} memakai versi API lama;
+  \item \codepath{src/main.rs} hilang atau entrypoint menunjuk keluar proyek;
+  \item local dependency mencoba keluar dari arsip;
+  \item arsip memuat symlink atau path yang tidak aman;
+  \item ukuran terkode atau hasil ekstraksi terlalu besar.
+\end{itemize}
+
+Buka ZIP dan lihat tingkat pertamanya. Susunan managed application yang bersih adalah \codepath{Cargo.toml}, \codepath{ota-app.toml}, dan \codepath{src}.
+
+\section{Build berhenti sebelum kode Anda muncul}
+
+Baris log pertama menguji \codepath{cargo}, \codepath{rustc}, dan \codepath{espflash}. Jika satu alat hilang, jalankan perintah \codepath{--version} miliknya pada lingkungan terminal yang sama dengan Axum.
+
+Setelah memasang alat, tutup dan nyalakan ulang terminal OTA. Sebuah process menyimpan lingkungan yang dimilikinya ketika pertama kali dijalankan.
+
+Di Windows, pesan \codepath{link.exe not found} menunjuk ke Visual Studio Build Tools dengan Desktop development with C++. Toolchain Espressif sendiri tidak menyediakan host linker tersebut.
+
+\section{Rust memberi satu halaman error compiler}
+
+Gulir ke kesalahan jelas pertama yang mencantumkan source path dan nomor baris. Kesalahan berikutnya sering tumbuh dari kesalahan pertama itu.
+
+Untuk aplikasi upload, periksa bentuk serah terimanya:
+
+\begin{lstlisting}[language=Rust,numbers=none]
+pub fn setup(context: &mut AppContext) -> anyhow::Result<State>
+pub fn main(context: AppContext, state: State) -> anyhow::Result<()>
+\end{lstlisting}
+
+Tipe state yang dikembalikan setup harus sama dengan parameter kedua pada main. Ambil hardware dari \codepath{context.peripherals}. Pastikan library baru mendukung target ESP32-S3 ESP-IDF.
+
+Lakukan satu koreksi, lalu build lagi. Mengubah lima hal sekaligus akan menyembunyikan perubahan mana yang sebenarnya berpengaruh.
+
+\section{Cargo berhasil dan pembuatan image gagal}
+
+Cari ELF path di dalam log. Baris berikutnya seharusnya memperlihatkan tahap \codepath{espflash save-image}. Jalankan \codepath{espflash --version} di terminal Axum dan pastikan perintah yang diharapkan tersedia.
+
+Server hanya menerima application image yang tidak kosong di \codepath{firmware-builds}. Baris Cargo sukses tidak dapat menggantikan berkas \codepath{.bin} yang hilang.
+
+\section{PC melihat firmware, board tidak melihatnya}
+
+Perhatikan \codepath{public_base_url} pada respons status. Nilainya harus berisi IP LAN milik PC. Coba buka URL LAN itu dari ponsel atau komputer lain pada Wi-Fi yang sama.
+
+Jika perangkat kedua tidak dapat membukanya, periksa firewall PC, network profile, rute VPN, dan client isolation pada access point. Jika perangkat kedua dapat membukanya, bandingkan dengan URL yang benar-benar dikompilasi ke runtime ESP32.
+
+\section{Kartu perangkat tidak pernah muncul}
+
+Dashboard tidak mencari perangkat USB secara otomatis. Registrasi harus dikirim oleh program yang berjalan di ESP32.
+
+Buka serial monitor. Cari koneksi Wi-Fi terlebih dahulu, lalu cari registration POST. Pastikan board menerima SSID, password, dan LAN server URL yang benar ketika dibangun.
+
+Jika provisioning Wi-Fi belum pernah dilakukan, kembali ke flash USB pertama di Bab 7.
+
+\section{Kartu tetap berada pada Pending}
+
+Pending berarti Axum sudah menyimpan deployment. Server belum menerima kabar selesai dari perangkat.
+
+Periksa \codepath{last_seen}. Runtime biasanya melakukan polling setiap tiga puluh detik. Pastikan desired version berbeda dari current version dan chip perangkat cocok dengan target firmware. Terminal serial semestinya memperlihatkan pemeriksaan update berikutnya atau kesalahan jaringannya.
+
+\section{Ukuran atau SHA-256 tidak cocok}
+
+Runtime membatalkan writer pada slot yang tidak aktif. Itulah respons yang aman. Size mismatch mengarah pada download terpotong atau metadata yang salah. Hash mismatch berarti byte yang diterima tidak sama dengan artifact yang dicatat Axum.
+
+Download firmware yang sama pada PC, periksa ukuran berkas, lalu bandingkan hash-nya dengan metadata. Jangan membuang pemeriksaan di sisi perangkat hanya agar update terus berjalan.
+
+\section{Binary sudah terlalu besar untuk lacinya}
+
+Slot OTA contoh masing-masing berukuran \codepath{0x1e0000} byte. Bandingkan ukuran binary dengan ukuran partisi nyata. Kurangi kode atau dependensi terlebih dahulu. Slot yang lebih besar membutuhkan revisi tabel partisi dengan teliti dan biasanya diikuti provisioning serial baru.
+
+\section{Delete menjawab 409 Conflict}
+
+Firmware masih terhubung ke desired state perangkat atau riwayat deployment. Penolakan itu melindungi hubungan antarcatatan. Jangan menghapus binary dengan tangan selama SQLite masih menunjuk kepadanya.
+
+\section{Di mana pesan terminal ESP32?}
+
+Pesan tersebut masih berada di serial monitor. Build History menampilkan output compiler dari PC. Devices menampilkan heartbeat dan status OTA. Kode dashboard saat ini belum melakukan streaming log dari board.
+
+Gunakan \codepath{espflash monitor} untuk saat ini. Bab berikutnya menunjukkan bagaimana serial bridge atau network logger dapat membawa pesan tersebut ke panel dashboard yang diberi label jelas.
+
+\begin{checkpoint}
+Ambil satu kegagalan nyata dari terminal. Tulis langkah terakhir yang berhasil, batas yang gagal, tes terkecil untuk batas itu, dan satu perubahan yang akan dicoba. Simpan pesan kesalahan asli di samping hasil percobaan.
+\end{checkpoint}

@@ -1,0 +1,109 @@
+\chapter{Berkenalan dengan Proyek Sebelum Menyentuh Kode}
+
+\section{Satu dashboard, dua pekerja}
+
+Buka dashboard di browser. Seluruh halaman memakai sidebar, warna, dan tombol yang sama, sehingga semuanya tampak seperti satu aplikasi. Di balik layar itu ada dua pekerja yang mempunyai meja masing-masing.
+
+Pekerja Python mendengarkan pada port 5000. Berikan sebuah berkas CSV, lalu ia akan membaca baris-barisnya, menghitung ringkasan, membuat laporan, dan menerapkan pilihan pembersihan data. Pekerja Rust mendengarkan pada port 7000. Berikan sebuah proyek firmware, lalu ia akan menjaga proses upload, menjalankan alat build, menyimpan binary yang selesai, dan mengingat perangkat mana yang perlu menerimanya.
+
+Bayangkan sebuah bengkel kecil dengan satu meja penerima tamu dan dua meja kerja. Browser adalah meja penerima tamu. Meja pertama menangani data. Meja kedua menangani firmware.
+
+\begin{center}
+\begin{tcolorbox}[width=0.9\textwidth,colback=BookPaper,colframe=BookTealLight,arc=3pt]
+\centering\ttfamily
+Anda memakai dashboard pada :5000\par
+\vspace{0.25em}
+$\swarrow$\hspace{7em}$\searrow$\par
+\vspace{0.25em}
+Flask + Pandas :5000\hspace{3em}Axum :7000\par
+pekerjaan CSV\hspace{6.4em}pekerjaan firmware\par
+\hspace*{13em}$\downarrow$\par
+\hspace*{10em}ESP32-S3 melalui Wi-Fi
+\end{tcolorbox}
+\end{center}
+
+Pemisahan meja ini melindungi CSV profiler yang sudah bekerja. Penambahan fitur firmware tidak memaksa kita membangun ulang layanan data dengan Rust. Browser hanya perlu mengetahui alamat mana yang harus dipanggil.
+
+\begin{mentorbox}[Sebuah istilah yang akan sering muncul]
+Pengembang menyebut serah terima antara dua program sebagai \emph{service boundary}, atau batas layanan. Di proyek ini, batas tersebut hanyalah sebuah permintaan HTTP. Istilahnya terdengar resmi, tetapi gambarnya sederhana: satu program meminta program lain mengerjakan tugas yang namanya jelas.
+\end{mentorbox}
+
+\section{Ikuti perjalanan berkas CSV dengan jari}
+
+Misalkan Anda memilih \codepath{readings.csv}, lalu menekan Run Profiling. Browser mengirim berkas itu ke Flask. Flask menyimpan salinan kerja dan memulai pekerjaan profiling yang lebih lambat di latar belakang. Ketika Pandas membaca data, browser menerima kabar kemajuan. Setelah laporan selesai, Flask menyajikan halaman HTML hasilnya.
+
+Setiap tindakan CSV berikutnya kembali kepada pekerja yang sama. Previous Runs meminta daftar sesi tersimpan dari Flask. Cleaning meminta Flask mengubah salinan kerja. Playground meminta Flask menjalankan satu operasi Pandas kecil.
+
+Jalurnya dapat diingat dalam satu baris:
+
+\begin{center}
+\ttfamily browser $\rightarrow$ Flask $\rightarrow$ Pandas $\rightarrow$ laporan
+\end{center}
+
+\section{Sekarang ikuti perjalanan ZIP firmware}
+
+Perjalanan OTA dimulai dengan ZIP karena sebuah program Rust terdiri dari lebih dari satu berkas sumber. Di dalamnya dapat ada manifest Cargo, modul tambahan, dan dependensi library. Browser mengirim ZIP tersebut bersama pilihan board dan nomor versi kepada Axum.
+
+Axum memeriksa arsip sebelum membukanya. Setelah aman, Axum meminta Cargo mengompilasi proyek untuk ESP32-S3. Cargo menghasilkan executable ELF. \codepath{espflash} mengubah ELF itu menjadi image aplikasi ESP-IDF. Server menghitung sidik jari SHA-256 dan menyimpan binary di dalam \codepath{firmware-builds}.
+
+Nanti, perangkat bertanya apakah ada pembaruan yang menunggunya. Jika pembaruan sudah ditugaskan, ESP32 mengunduh berkas \codepath{.bin}. ESP32 tidak pernah menerima ZIP ataupun berkas \codepath{.rs} yang berdiri sendiri.
+
+\begin{center}
+\ttfamily ZIP $\rightarrow$ Cargo $\rightarrow$ ELF $\rightarrow$ aplikasi .bin $\rightarrow$ ESP32
+\end{center}
+
+\section{Gunakan folder sebagai papan penunjuk}
+
+Simpan tabel ini di dekat Anda selama beberapa sesi pertama. Untuk awal, cukup pahami kalimat pertama pada setiap baris.
+
+\begin{longtable}{>{\ttfamily\footnotesize\raggedright\arraybackslash}p{0.39\textwidth}p{0.53\textwidth}}
+\toprule
+Folder atau berkas & Isi yang tinggal di sana\\
+\midrule
+\endhead
+web/ & Halaman yang terlihat: HTML, CSS, dan JavaScript browser.\\
+python/profiler\_server.py & Route Flask dan seluruh pekerjaan CSV yang sudah ada.\\
+ota-server/ & Server Axum, kode basis data, pemeriksaan ZIP, runner build, dan API perangkat.\\
+firmware-projects/ & Folder kerja privat yang dibuat saat Axum mengekstrak upload.\\
+firmware-builds/ & Binary aplikasi OTA yang sudah selesai.\\
+data/ota.db & Buku catatan SQLite tempat Axum mengingat proyek, build, firmware, perangkat, dan deployment.\\
+examples/esp32-rust-ota-client/ & Program dasar yang stabil, dipasang pada board dan dipakai kembali dalam managed build.\\
+examples/uploaded-firmware-basic/ & Aplikasi paling kecil yang dapat dipelajari dan diunggah.\\
+examples/uploaded-firmware-with-libs/ & Aplikasi kedua yang memperlihatkan library Cargo tambahan.\\
+docs/OTA\_GUIDE.md & Catatan teknis yang lebih singkat tentang partisi, rollback, dan jaringan.\\
+\bottomrule
+\end{longtable}
+
+Ketiga folder penyimpanan akan terisi sendiri saat sistem berjalan. Kode yang Anda tulis dengan tangan berada di \codepath{web}, \codepath{python}, \codepath{ota-server}, atau sebuah proyek aplikasi di bawah \codepath{examples}.
+
+\section{Program main yang mana yang benar-benar utama?}
+
+Ada tiga program yang berjalan di tiga tempat. Browser menjalankan JavaScript. PC menjalankan Flask dan Axum. ESP32 menjalankan satu image firmware hasil kompilasi.
+
+Di dalam image firmware itu, \codepath{examples/esp32-rust-ota-client/src/main.rs} memiliki entrypoint asli \codepath{fn main()}. Aplikasi yang Anda unggah juga menyimpan berkas bernama \codepath{src/main.rs}, tetapi berkas tersebut mengekspor dua fungsi yang dapat dipanggil, yaitu \codepath{setup} dan \codepath{main}. Saat build, Rust menautkan kedua fungsi itu ke runtime yang stabil.
+
+Bayangkan runtime sebagai sebuah rumah yang kabel listrik dan saluran airnya sudah terpasang. Aplikasi Anda menentukan kegiatan di dalam ruangannya. Hasil build tetap berupa satu rumah lengkap. Tidak ada program kedua yang ditumpuk di atas program pertama.
+
+\section{Mengapa flash pertama memakai USB}
+
+ESP32 baru belum mengetahui nama Wi-Fi Anda. Ia belum memiliki alamat server OTA dan belum mempunyai tabel partisi OTA dua slot. USB memberinya fondasi pertama: bootloader, partisi, runtime yang memahami Wi-Fi, dan sebuah aplikasi bawaan kecil.
+
+Sesudah flash pertama berhasil, board dapat memperkenalkan diri kepada server dan meminta rilis berikutnya melalui Wi-Fi.
+
+\begin{mentorbox}[Jawaban singkatnya]
+Ya, flash runtime stabil ke ESP32-S3 terlebih dahulu. Biasanya langkah ini dilakukan sekali ketika board disiapkan. Setelah perangkat mampu bergabung ke jaringan dan menjangkau port 7000 pada PC, OTA dapat mengambil alih pembaruan berikutnya.
+\end{mentorbox}
+
+\section{Siapa yang memegang modem Wi-Fi?}
+
+ESP32 hanya memiliki satu sumber daya modem. Runtime mengambilnya satu kali, lalu menyerahkannya kepada \codepath{wifi-manager}. Manager tersebut menjaga koneksi untuk heartbeat dan pemeriksaan OTA. Aplikasi Anda menerima keadaan jaringan melalui \codepath{AppContext}, bersama pin dan pengendali hardware lain yang boleh dipakai.
+
+Susunan ini menyediakan tempat untuk layar pengaturan Wi-Fi yang lebih ramah di masa depan. Kredensial tersimpan, aturan reconnect, atau captive portal dapat tinggal di dalam manager. Aplikasi sensor tetap dapat memusatkan perhatian pada sensor.
+
+\begin{warningbox}
+Jangan memanggil \codepath{Peripherals::take()} dari aplikasi yang diunggah. Runtime sudah mengambil kumpulan global tersebut. Gunakan \codepath{context.peripherals}, lalu ambil hanya pin atau controller yang benar-benar diperlukan aplikasi.
+\end{warningbox}
+
+\begin{checkpoint}
+Buka repositori dan cari empat tempat ini: \codepath{web/index.html}, \codepath{python/profiler_server.py}, \codepath{ota-server/src/main.rs}, dan \codepath{examples/esp32-rust-ota-client/src/main.rs}. Ucapkan mesin mana yang menjalankan masing-masing berkas. Kalimat kecil itu akan mencegah banyak kebingungan di bab berikutnya.
+\end{checkpoint}

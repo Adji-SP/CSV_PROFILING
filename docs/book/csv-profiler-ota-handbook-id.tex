@@ -1,0 +1,116 @@
+\documentclass[11pt,letterpaper,openany]{book}
+\usepackage{beautybook-inspired}
+
+\renewcommand{\BookSectionLabel}{Bag.}
+\renewcommand{\BookPartLabel}{Bagian}
+\renewcommand{\MentorBoxTitle}{Catatan dari meja tutor}
+\renewcommand{\WarningBoxTitle}{Berhenti sebentar sebelum lanjut}
+\renewcommand{\CheckpointBoxTitle}{Coba dahulu sebelum lanjut}
+\renewcommand{\contentsname}{Daftar Isi}
+\renewcommand{\chaptername}{Bab}
+\renewcommand{\appendixname}{Lampiran}
+\renewcommand{\partname}{Bagian}
+
+\newcommand{\BookTitle}{Membangun Dashboard Profiling CSV dan OTA ESP32}
+\newcommand{\BookSubtitle}{Panduan bersahabat dari klik pertama\\sampai pembaruan pertama}
+\newcommand{\BookAuthor}{Adji-SP}
+\hypersetup{
+  pdftitle={Membangun Dashboard Profiling CSV dan OTA ESP32},
+  pdfauthor={Adji-SP},
+  pdfsubject={Panduan pemula untuk dashboard CSV Profiling dan sistem OTA ESP32-S3}
+}
+
+\begin{document}
+\frontmatter
+
+\bookcover{\BookAuthor}{Membangun Dashboard Profiling CSV\\dan OTA ESP32}{\BookSubtitle}{Edisi Bahasa Indonesia}{CSV\_PROFILING}
+
+\cleardoublepage
+\thispagestyle{empty}
+\vspace*{0.58\textheight}
+{\small
+\textbf{\BookTitle}\par
+Edisi Bahasa Indonesia, September 2026.\par
+
+Buku ini mendokumentasikan proyek lokal sebagaimana diterapkan di repositori ini. PDF \emph{beautybook} yang diberikan menjadi inspirasi untuk tata visualnya. Seluruh penjelasan dan contoh ditulis khusus untuk CSV\_PROFILING.\par
+
+Perintah yang menyentuh perangkat keras diberi tanda yang jelas. Periksa ukuran flash ESP32-S3, port serial, tabel partisi, dan pengaturan jaringan lokal sebelum menjalankannya.\par
+}
+\clearpage
+
+\frontbanner{Kata Pengantar}
+Saat folder proyek dibuka untuk pertama kali, rasanya seperti ada tiga pelajaran yang ditumpuk di atas satu meja: analisis data, pengembangan web, dan Rust untuk perangkat embedded. Kita tidak perlu mengangkat semuanya sekaligus. Ambil satu bagian kecil, pahami tugasnya, lalu sambungkan dengan bagian berikutnya.
+
+Di belakang dashboard terdapat dua ruang kerja. Flask dan Pandas mengurus berkas CSV. Axum mengurus build firmware dan perangkat. Lebih jauh lagi, sebuah ESP32-S3 terhubung melalui Wi-Fi dan bertanya kepada server apakah ada aplikasi baru untuknya. Setelah gambaran tiga ruang ini terasa akrab, susunan folder tidak lagi tampak seperti dinding penuh nama asing.
+
+Gunakan buku ini sambil membuka proyek di sebelahnya. Baca beberapa halaman, sentuh berkas yang sedang dibicarakan, lalu kerjakan pemeriksaan kecil di akhir bab. Biarkan terminal tetap terlihat. Pesan gagal pada sebuah perintah sering kali menunjukkan pintu mana yang masih terkunci.
+
+\begin{flushright}
+\textit{Proyek CSV\_PROFILING}\par
+2026
+\end{flushright}
+\clearpage
+
+\frontbanner{Cara Menggunakan Buku Ini}
+Anggap halaman-halaman ini sebagai buku catatan bengkel yang penuh coretan penunjuk. Kode tidak perlu dihafalkan. Buka repositori, ikuti jalur berhuruf monospace, lalu bandingkan contoh pendek dengan berkas aslinya. Perintah Windows memakai PowerShell. Perintah Linux dan macOS memakai shell POSIX.
+
+Di sepanjang pelajaran, Anda akan menjumpai tiga jenis catatan:
+
+\begin{mentorbox}
+Catatan tutor memperlambat langkah untuk menjawab pertanyaan yang biasanya muncul saat dua orang duduk di meja yang sama.
+\end{mentorbox}
+
+\begin{warningbox}
+Catatan berhenti muncul sebelum sebuah perintah dapat menyentuh perangkat keras, menghapus data, atau melonggarkan batas keamanan.
+\end{warningbox}
+
+\begin{checkpoint}
+Latihan kecil membiarkan layar Anda sendiri membuktikan penjelasan yang baru dibaca.
+\end{checkpoint}
+
+Anda dapat mulai walau ESP32 belum ada di atas meja. Dashboard, API, basis data, pemeriksaan ZIP, dan pesan kesalahan berjalan di komputer. Ketika pelajaran sampai pada proses flash fisik, buku akan mengatakannya dengan terang.
+\clearpage
+
+\tableofcontents
+
+\mainmatter
+
+\part{Dasar-Dasar}
+\partintro{Kita mulai dari ambang pintu. Anda akan melihat bentuk utuh proyek dengan bahasa sederhana, lalu menyalakannya pelan-pelan sambil membaca tanda-tanda kecil yang menunjukkan bahwa semuanya sehat.}
+\include{chapters-id/01-system-tour}
+\include{chapters-id/02-first-start}
+
+\part{Dashboard dan CSV Profiler}
+\partintro{Satu berkas CSV akan menjadi pemandu. Kita akan mengikutinya dari tombol upload menuju Python, melihat laporan kembali ke browser, lalu mengintip cara setiap layar dashboard bekerja.}
+\include{chapters-id/03-frontend}
+\include{chapters-id/04-csv-profiler}
+
+\part{Layanan OTA Rust}
+\partintro{Sekarang kita masuk ke server Rust. Satu ZIP firmware akan dibuka dengan hati-hati, lalu kita ikuti sampai berubah menjadi image aplikasi sungguhan beserta riwayat build-nya.}
+\include{chapters-id/05-ota-server}
+\include{chapters-id/06-build-pipeline}
+
+\part{Firmware di ESP32-S3}
+\partintro{ESP32 akhirnya ikut bekerja. Mula-mula ia menerima fondasi yang andal melalui USB. Sesudah itu, kode aplikasi Anda dapat ikut masuk ke dalam setiap rilis OTA yang lengkap.}
+\include{chapters-id/07-embedded-runtime}
+\include{chapters-id/08-writing-firmware}
+\include{chapters-id/09-device-protocol}
+
+\part{Latihan dan Pengembangan Lanjutan}
+\partintro{Bagian terakhir adalah meja praktik. Anda akan menjalankan alur lengkap, belajar membaca kegagalan yang umum, dan merancang pengembangan baru tanpa membongkar bagian yang sudah bekerja.}
+\include{chapters-id/10-lab}
+\include{chapters-id/11-troubleshooting}
+\include{chapters-id/12-extending}
+
+\appendix
+\include{chapters-id/a-api-reference}
+\include{chapters-id/b-reference}
+
+\backmatter
+\chapter*{Catatan Penutup}
+\addcontentsline{toc}{chapter}{Catatan Penutup}
+Sekarang Anda mempunyai peta dari klik di browser sampai laporan Pandas, serta dari sumber Rust yang diunggah sampai image aplikasi yang ditulis ke slot OTA ESP32 yang sedang tidak aktif. Peta itu lebih berguna daripada hafalan perintah. Saat sesuatu gagal, cari batas tempat kegagalannya terlebih dahulu: browser ke Flask, browser ke Axum, builder ke toolchain, PC ke jaringan lokal, atau bootloader ke aplikasi. Log pada batas tersebut biasanya memberi petunjuk paling jujur tentang langkah berikutnya.
+
+Jaga agar runtime awal selalu dapat dipulihkan melalui USB. Uji rollback pada perangkat nyata. Perlakukan bahan build yang diunggah sebagai kode tepercaya sampai builder benar-benar dijalankan di dalam sandbox. Kebiasaan ini memberi ruang bagi proyek untuk tumbuh sambil menjaga pemisahan yang membuatnya mudah dipahami.
+
+\end{document}

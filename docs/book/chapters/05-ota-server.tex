@@ -1,0 +1,146 @@
+\chapter{Meet the Rust OTA Server}
+
+\section{Read main.rs as a morning routine}
+
+Open \codepath{ota-server/src/main.rs}. The file may look formal at first, yet its job is close to opening a workshop in the morning. Turn on the lights. Unlock the cabinets. Put the tools on the bench. Open the front door.
+
+The Rust version of that routine goes in this order:
+
+\begin{enumerate}
+  \item Start logging so the terminal can tell us what happens.
+  \item Read settings from \codepath{.env}.
+  \item Open the SQLite database.
+  \item Prepare the firmware builder.
+  \item Prepare the coordinator that watches each build.
+  \item Put those shared pieces into \codepath{AppState}.
+  \item Connect the HTTP routes.
+  \item Listen on the configured address and port.
+\end{enumerate}
+
+Here is the middle of that routine with some details folded away:
+
+\begin{lstlisting}[language=Rust]
+let config = Arc::new(Config::load()?);
+let storage = Storage::connect(&config.database_url()).await?;
+let builder = Arc::new(LocalFirmwareBuilder::new(/* settings */));
+let coordinator = Arc::new(BuildCoordinator::new(
+    storage.clone(),
+    builder,
+    config.project_dir.clone(),
+    config.build_dir.clone(),
+));
+
+let state = AppState { config, storage, coordinator };
+\end{lstlisting}
+
+The word \codepath{Arc} means several requests can safely hold a shared reference to the same service object. You do not need to master it now. Notice the shape: configuration, storage, and building meet in one state bundle, and route handlers receive that bundle when they need it.
+
+\section{Configuration is the page of house rules}
+
+Move to \codepath{ota-server/src/config.rs}. This file reads each \codepath{OTA_...} setting, supplies local defaults, checks values, and resolves folder paths from the repository root.
+
+It also creates \codepath{firmware-projects}, \codepath{firmware-builds}, and \codepath{data} when they are missing. That is why a fresh copy of the project can start without you building those folders by hand.
+
+If no public URL is supplied, the server tries to detect a likely LAN address. Detection is convenient on a simple home network. An explicit \codepath{OTA_PUBLIC_BASE_URL} is easier to reason about when a PC has Ethernet, Wi-Fi, virtual adapters, or a VPN.
+
+When startup succeeds, the terminal prints two views:
+
+\begin{lstlisting}[numbers=none]
+OTA Server running
+Local:
+http://localhost:7000
+
+LAN / public firmware URL:
+http://192.168.1.5:7000
+\end{lstlisting}
+
+The local line is for the browser on the PC. The LAN line is the address an ESP32 can reach.
+
+\section{Routes are the labels on the front desk}
+
+Open \codepath{ota-server/src/routes/mod.rs}. This file is short because it mainly matches an address with the function that handles it.
+
+The work is grouped into three nearby files:
+
+\begin{description}
+  \item[\codepath{routes/firmware.rs}] Receives project ZIP files and serves finished firmware.
+  \item[\codepath{routes/builds.rs}] Starts builds and returns build history or logs.
+  \item[\codepath{routes/devices.rs}] Remembers boards, heartbeats, deployments, update checks, and OTA progress.
+\end{description}
+
+Find this line:
+
+\begin{lstlisting}[language=Rust,numbers=none]
+.route("/api/ota/status", get(status))
+\end{lstlisting}
+
+Read it from left to right: when a GET request arrives at that address, call \codepath{status}. Other lines follow the same grammar.
+
+\section{Why the browser is allowed through}
+
+The page comes from port 5000 and calls a server on port 7000. Browsers treat those as different origins. Axum therefore needs a CORS rule that names the dashboard origins it trusts.
+
+The default list contains:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:5000
+http://127.0.0.1:5000
+\end{lstlisting}
+
+If you serve the frontend from another address, add that exact origin to \codepath{OTA_ALLOWED_ORIGINS}. A CORS error in the browser can happen even while the Axum status URL opens normally in its own tab.
+
+\begin{warningbox}
+Keep the origin list narrow. Allowing every website to call a local firmware builder turns a browser convenience into a needless open door.
+\end{warningbox}
+
+\section{Errors should speak in complete sentences}
+
+Open \codepath{ota-server/src/errors.rs}. Every ordinary API error carries an HTTP status, a short machine-readable code, and a message for a person. It may also carry details and a hint.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_FIRMWARE_PROJECT",
+    "message": "Managed application entrypoint was not found",
+    "details": "src/main.rs"
+  }
+}
+\end{lstlisting}
+
+The frontend can show the message without guessing what went wrong. A developer can use the short code in tests. The status number gives HTTP clients the broad category:
+
+\begin{description}
+  \item[400] The request could not be read.
+  \item[404] The named record does not exist.
+  \item[409] The request clashes with current state, such as a second active build.
+  \item[413] The upload is too large.
+  \item[422] The request was readable but failed a project rule.
+  \item[500] Something inside the server failed unexpectedly.
+\end{description}
+
+\section{SQLite is the server's notebook}
+
+The database file is \codepath{data/ota.db}. You do not need to create its tables. \codepath{storage.rs} does that during startup.
+
+Each table answers a different question:
+
+\begin{longtable}{p{0.19\textwidth}p{0.7\textwidth}}
+\toprule
+Table & The question it answers\\
+\midrule
+\endhead
+projects & Which ZIP was uploaded, for which target and version?\\
+builds & What happened when we tried to compile it?\\
+firmware & Which successful binary can a device download?\\
+devices & Which boards have introduced themselves, and what did they report?\\
+deployments & Which firmware was assigned to which board, and how far did it get?\\
+\bottomrule
+\end{longtable}
+
+SQLite foreign keys tie those pages together. A firmware file that still belongs to a device or deployment cannot be casually deleted. The API returns a conflict instead of tearing a page out of the notebook and leaving dangling references behind.
+
+\begin{checkpoint}
+Open \codepath{main.rs}, \codepath{config.rs}, \codepath{routes/mod.rs}, and \codepath{storage.rs} in four tabs. In each tab, find the one place that matches its chapter role: startup, settings, addresses, and database tables.
+\end{checkpoint}
+

@@ -1,0 +1,107 @@
+\chapter{Configuration, Commands, and Glossary}
+
+Keep this appendix near your terminal. It gathers names and commands that are easy to forget after you understand the larger idea. Copy a command only after reading the short note around it, especially when hardware is connected.
+
+\section{Environment variables}
+
+\begin{longtable}{>{\ttfamily\small}p{0.29\textwidth}p{0.22\textwidth}p{0.39\textwidth}}
+\toprule
+Variable & Default/example & Meaning\\
+\midrule
+\endhead
+OTA\_BIND\_ADDRESS & \codepath{0.0.0.0} & Listener interface; LAN access needs a non-loopback binding.\\
+OTA\_PORT & \codepath{7000} & Axum HTTP port.\\
+OTA\_PUBLIC\_BASE\_URL & detected or explicit & Base placed in device-facing firmware URLs. Use the PC LAN address.\\
+OTA\_PROJECT\_DIR & \codepath{firmware-projects} & Safe root for extracted uploads.\\
+OTA\_BUILD\_DIR & \codepath{firmware-builds} & Safe root for generated application images.\\
+OTA\_DATA\_DIR & \codepath{data} & Directory containing \codepath{ota.db}.\\
+OTA\_RUNTIME\_DIR & \codepath{examples/esp32-rust-ota-client} & Stable runtime template used for managed builds.\\
+OTA\_MAX\_UPLOAD\_MB & \codepath{50} & Encoded project field limit in MiB.\\
+OTA\_MAX\_EXTRACTED\_MB & upload limit times 10 & Maximum total declared extracted content.\\
+OTA\_ALLOWED\_ORIGINS & localhost and 127.0.0.1 on port 5000 & Comma-separated browser origin allow-list.\\
+OTA\_RUST\_TOOLCHAIN & \codepath{esp} & Rustup toolchain applied to builder commands; empty uses the process default.\\
+WIFI\_SSID & none & Embedded Wi-Fi network name used at managed build time.\\
+WIFI\_PASS & none & Embedded Wi-Fi password. Keep it in local \codepath{.env}.\\
+DEVICE\_NAME & managed-device label & Friendly device name embedded into managed firmware.\\
+DEVICE\_ID & MAC-derived when absent & Optional stable identity override.\\
+RUST\_LOG & info defaults & Axum and tower-http tracing filter.\\
+\bottomrule
+\end{longtable}
+
+\section{Command sheet}
+
+\subsection{Start services}
+
+\begin{lstlisting}[numbers=none]
+# Windows
+.\run-dev.bat
+
+# Linux/macOS
+./run-dev.sh
+\end{lstlisting}
+
+\subsection{Run OTA server checks}
+
+\begin{lstlisting}[numbers=none]
+cargo test --manifest-path ota-server/Cargo.toml
+cargo clippy --manifest-path ota-server/Cargo.toml --all-targets
+curl http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+\subsection{Check embedded tools}
+
+\begin{lstlisting}[numbers=none]
+cargo --version
+rustc +esp --version
+espflash --version
+rustc +esp --print target-list
+\end{lstlisting}
+
+\subsection{Build the stable runtime without flashing}
+
+\begin{lstlisting}[numbers=none]
+cd examples/esp32-rust-ota-client
+cargo +esp build --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+\subsection{Build and flash the stable runtime}
+
+\begin{lstlisting}[numbers=none]
+cargo +esp run --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+The runner settings determine the exact \codepath{espflash} arguments and partition-table use. Inspect \codepath{.cargo/config.toml} in the embedded project before physical flashing.
+
+\section{Glossary}
+
+\begin{description}
+  \item[Application image] A \codepath{.bin} containing one ESP-IDF application, suitable for an OTA app partition.
+  \item[Axum] The Rust HTTP framework used by the OTA service.
+  \item[Build ID] UUID identifying one compilation attempt and its durable logs.
+  \item[Cargo target] The architecture and platform a Rust crate is compiled for. This project begins with \codepath{xtensa-esp32s3-espidf}.
+  \item[CORS] Browser policy controlling which page origins may call the OTA API.
+  \item[Deployment] A stored relationship saying one device should install one firmware record.
+  \item[ELF] Linked executable format consumed by \codepath{espflash save-image}.
+  \item[ESP-IDF] Espressif's official development framework and system services used beneath Rust bindings.
+  \item[Firmware ID] UUID identifying one ready application image and metadata record.
+  \item[Flask] The Python HTTP framework serving the dashboard and CSV API.
+  \item[Heartbeat] Periodic device request refreshing version, status, IP address, and last-seen time.
+  \item[Inactive slot] OTA application partition that is not currently executing and can safely receive a new image.
+  \item[Managed application] Uploaded function-based Rust package composed with the stable runtime by the server.
+  \item[NVS] ESP-IDF non-volatile storage, commonly used for settings and Wi-Fi configuration.
+  \item[OTA] Over-the-air firmware update performed through a network connection.
+  \item[Pull model] The device polls for desired firmware and initiates its own download.
+  \item[Rollback] Bootloader-assisted return to a previously valid application slot when a new image fails startup validation.
+  \item[SHA-256] Hash used here to confirm downloaded bytes match server metadata.
+  \item[SSE] Server-sent events, the one-way HTTP stream used for CSV profiling progress.
+  \item[Stable runtime] Initially flashed platform code that owns Wi-Fi, OTA, rollback, and application lifecycle.
+  \item[Standalone firmware] Uploaded Cargo project built without managed-runtime composition; it owns its complete device behavior.
+  \item[WAL] SQLite write-ahead logging mode, used to improve local concurrent access behavior.
+  \item[ZIP slip] Archive path traversal that attempts to extract outside the intended root.
+\end{description}
+
+\section{Current implementation limits}
+
+The first version supports ESP32-S3, local SQLite storage, polling for build logs, plain HTTP on a trusted LAN, local trusted builds, and SHA-256 integrity checks. Device serial/network terminal streaming, isolated Docker builds, multi-user authentication, publisher signing, and additional chip targets are extension work described in Chapter 12.
+
+These limits are design boundaries, not hidden promises. Keeping them visible helps a beginner distinguish what can be used today from what still needs engineering and hardware validation.

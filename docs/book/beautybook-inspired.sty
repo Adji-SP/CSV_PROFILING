@@ -1,0 +1,241 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{beautybook-inspired}[2026/09/07 CSV Profiler OTA handbook style]
+
+\RequirePackage[T1]{fontenc}
+\RequirePackage[utf8]{inputenc}
+\RequirePackage{lmodern}
+\RequirePackage{microtype}
+\RequirePackage[letterpaper,inner=0.88in,outer=0.72in,top=0.88in,bottom=0.82in,headheight=22pt]{geometry}
+\RequirePackage{xcolor}
+\RequirePackage{graphicx}
+\RequirePackage{tikz}
+\RequirePackage{titlesec}
+\RequirePackage{fancyhdr}
+\RequirePackage{booktabs}
+\RequirePackage{longtable}
+\RequirePackage{tabularx}
+\RequirePackage{array}
+\RequirePackage{enumitem}
+\RequirePackage{listings}
+\RequirePackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\RequirePackage{hyperref}
+\RequirePackage{xurl}
+\RequirePackage{caption}
+
+\definecolor{BookInk}{HTML}{1E293B}
+\definecolor{BookTeal}{HTML}{2F5960}
+\definecolor{BookTealLight}{HTML}{DCE6E8}
+\definecolor{BookIndigo}{HTML}{6366F1}
+\definecolor{BookIndigoLight}{HTML}{EEF2FF}
+\definecolor{BookOrange}{HTML}{F97316}
+\definecolor{BookGreen}{HTML}{15803D}
+\definecolor{BookRed}{HTML}{B91C1C}
+\definecolor{BookPaper}{HTML}{F8FAFC}
+\definecolor{BookGray}{HTML}{64748B}
+\definecolor{BookLine}{HTML}{CBD5E1}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=BookTeal,
+  urlcolor=BookIndigo,
+  citecolor=BookTeal,
+  pdfborder={0 0 0}
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\raggedbottom
+\setlist{nosep,leftmargin=1.5em,topsep=0.35em}
+\renewcommand{\arraystretch}{1.2}
+\captionsetup{font=small,labelfont={bf,color=BookTeal}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\bfseries\color{BookTeal}\thechapter\quad\nouppercase{\leftmark}}
+\fancyhead[RO]{\small\bfseries\color{BookTeal}\nouppercase{\rightmark}}
+\renewcommand{\headrulewidth}{0.8pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{BookTealLight}\leaders\hrule height \headrulewidth\hfill}}
+\fancyfoot[C]{\tikz[baseline=-0.65ex]\node[fill=BookTealLight,rounded corners=8pt,text=BookTeal,font=\bfseries,inner xsep=12pt,inner ysep=3pt]{\thepage};}
+\renewcommand{\chaptermark}[1]{\markboth{#1}{}}
+\renewcommand{\sectionmark}[1]{\markright{Sec \thesection\quad #1}}
+
+\titleformat{\chapter}[display]
+  {\normalfont\color{BookInk}}
+  {\begin{tikzpicture}[baseline=(n.base)]
+     \node[draw=BookTeal,line width=2pt,circle,minimum size=1.28cm,text=BookTeal,font=\fontsize{34}{34}\selectfont\bfseries] (n) {\thechapter};
+     \draw[BookTealLight,line width=7pt] (0.72,0) -- (11.9,0);
+   \end{tikzpicture}}
+  {-0.35em}
+  {\Huge\scshape\raggedleft}
+  [\vspace{0.25em}{\color{BookTeal}\rule{\textwidth}{1pt}}]
+
+\providecommand{\BookSectionLabel}{Sec}
+\providecommand{\BookPartLabel}{Part}
+\providecommand{\MentorBoxTitle}{From the tutor's notebook}
+\providecommand{\WarningBoxTitle}{Pause before you continue}
+\providecommand{\CheckpointBoxTitle}{Try it before moving on}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{BookInk}}
+  {\colorbox{BookTeal}{\color{white}\strut\hspace{0.25em}\BookSectionLabel\ \thesection\hspace{0.25em}}}
+  {0.7em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{BookTeal}}
+  {\thesubsection}{0.6em}{}
+\titlespacing*{\chapter}{0pt}{-1.1cm}{1.1cm}
+\titlespacing*{\section}{0pt}{1.3em}{0.6em}
+
+\titleformat{\part}[display]
+  {\thispagestyle{empty}\centering\normalfont\color{BookInk}}
+  {\vspace*{0.22\textheight}\Large\scshape \BookPartLabel\ \thepart}
+  {1.2em}
+  {\Huge\scshape}
+  [\vspace{1.1em}{\color{BookTeal}\rule{0.62\textwidth}{5pt}}]
+\titlespacing*{\part}{0pt}{0pt}{1.2em}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\codepath}[1]{\nolinkurl{#1}}
+\newcommand{\httpmethod}[1]{\colorbox{BookTeal}{\color{white}\footnotesize\bfseries\strut\ #1\ }}
+\newcommand{\apirow}[3]{\httpmethod{#1} & \codepath{#2} & #3\\}
+
+\lstdefinelanguage{Rust}{
+  keywords={as,async,await,break,const,continue,crate,dyn,else,enum,extern,false,fn,for,if,impl,in,let,loop,match,mod,move,mut,pub,ref,return,self,Self,static,struct,super,trait,true,type,unsafe,use,where,while},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]"
+}
+\lstdefinelanguage{JavaScript}{
+  keywords={async,await,break,case,catch,class,const,continue,default,delete,do,else,export,false,finally,for,function,if,import,in,let,new,null,return,switch,this,throw,true,try,typeof,var,while},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]",
+  morestring=[b]'
+}
+\lstdefinelanguage{JSON}{
+  morestring=[b]",
+  sensitive=true,
+  morecomment=[l]{//}
+}
+\lstdefinelanguage{TOML}{
+  morecomment=[l]{\#},
+  morestring=[b]",
+  morestring=[b]'
+}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{BookIndigo}\bfseries,
+  commentstyle=\color{BookGray}\itshape,
+  stringstyle=\color{BookGreen},
+  backgroundcolor=\color{BookPaper},
+  frame=single,
+  rulecolor=\color{BookLine},
+  numbers=left,
+  numberstyle=\tiny\color{BookGray},
+  numbersep=8pt,
+  xleftmargin=1.6em,
+  framexleftmargin=1.2em,
+  breaklines=true,
+  breakatwhitespace=false,
+  keepspaces=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  tabsize=2,
+  aboveskip=0.8em,
+  belowskip=0.8em
+}
+
+\newtcolorbox{mentorbox}[1][\MentorBoxTitle]{
+  enhanced,breakable,
+  colback=BookIndigoLight,colframe=BookIndigo,
+  boxrule=0pt,leftrule=4pt,arc=2pt,
+  title={#1},fonttitle=\bfseries,coltitle=BookInk,
+  attach boxed title to top left={xshift=4mm,yshift=-2mm},
+  boxed title style={colback=BookIndigoLight,colframe=BookIndigoLight},
+  top=4mm
+}
+\newtcolorbox{warningbox}[1][\WarningBoxTitle]{
+  enhanced,breakable,
+  colback=orange!5,colframe=BookOrange,
+  boxrule=0pt,leftrule=4pt,arc=2pt,
+  title={#1},fonttitle=\bfseries,coltitle=BookInk,
+  attach boxed title to top left={xshift=4mm,yshift=-2mm},
+  boxed title style={colback=orange!5,colframe=orange!5},
+  top=4mm
+}
+\newtcolorbox{checkpoint}[1][\CheckpointBoxTitle]{
+  enhanced,breakable,
+  colback=green!4,colframe=BookGreen,
+  boxrule=0.7pt,arc=3pt,
+  title={#1},fonttitle=\bfseries,coltitle=white,
+  colbacktitle=BookGreen
+}
+\newtcolorbox{definitionbox}[1]{
+  enhanced,breakable,
+  colback=black!3,colframe=BookTealLight,
+  boxrule=0pt,leftrule=4pt,arc=2pt,
+  title={#1},fonttitle=\bfseries,coltitle=BookInk,
+  attach boxed title to top left={xshift=4mm,yshift=-2mm},
+  boxed title style={colback=black!3,colframe=black!3},
+  top=4mm
+}
+
+\newcommand{\partintro}[1]{
+  \begin{center}\itshape\large\color{BookGray}\begin{minipage}{0.72\textwidth}\centering #1\end{minipage}\end{center}
+  \clearpage
+}
+
+\newcommand{\bookcover}[5]{
+  \begin{titlepage}
+  \begin{tikzpicture}[remember picture,overlay]
+    \fill[BookInk] (current page.south west) rectangle (current page.north east);
+    \fill[BookTeal,opacity=0.56] ([yshift=-0.39\paperheight]current page.north west) rectangle ([yshift=-0.51\paperheight]current page.north east);
+    \foreach \x in {0,...,15} {
+      \draw[BookTealLight,opacity=0.18,line width=0.35pt]
+        ([xshift=-1cm,yshift={-0.6cm-0.25cm*\x}]current page.north west)
+        .. controls ([xshift={3cm+0.18cm*\x},yshift={-3cm-0.16cm*\x}]current page.north west)
+        and ([xshift={7cm-0.08cm*\x},yshift={-1cm-0.2cm*\x}]current page.north west)
+        .. ([xshift=1cm,yshift={-1cm-0.2cm*\x}]current page.north east);
+      \draw[BookTealLight,opacity=0.13,line width=0.35pt]
+        ([xshift={-1cm+0.18cm*\x},yshift=0.8cm]current page.south west)
+        .. controls ([xshift={3cm+0.15cm*\x},yshift={7cm-0.2cm*\x}]current page.south west)
+        and ([xshift={8cm-0.12cm*\x},yshift={1cm+0.16cm*\x}]current page.south west)
+        .. ([xshift=-0.5cm,yshift={4cm+0.1cm*\x}]current page.south east);
+    }
+    \foreach \y in {1,...,7} {
+      \fill[BookTealLight,opacity=0.13] ([xshift={0.7cm*\y},yshift={-1.15cm-0.42cm*\y}]current page.north west) rectangle ++(0.38,1.6);
+    }
+    \draw[BookTealLight,opacity=0.8,line width=0.8pt] ([xshift=-3.25cm,yshift=1.3cm]current page.south east) circle (0.22cm);
+    \draw[BookTealLight,opacity=0.45,line width=0.8pt] ([xshift=-3.25cm,yshift=1.3cm]current page.south east) circle (0.34cm);
+    \draw[BookTealLight,opacity=0.25,line width=0.8pt] ([xshift=-3.25cm,yshift=1.3cm]current page.south east) circle (0.47cm);
+  \end{tikzpicture}
+  \color{white}\sffamily
+  \vspace*{0.27\textheight}
+  {\Large #1\par}
+  \vspace{1.65cm}
+  {\fontsize{34}{39}\selectfont\bfseries #2\par}
+  \vspace{0.45cm}
+  {\LARGE\bfseries #3\par}
+  \vfill
+  {\Large\rmfamily\scshape #4\par}
+  \vfill
+  \begin{flushright}\large\rmfamily #5\end{flushright}
+  \end{titlepage}
+}
+
+\newcommand{\frontbanner}[1]{
+  \thispagestyle{empty}
+  \begin{tikzpicture}[remember picture,overlay]
+    \fill[BookTealLight] (current page.north west) rectangle ([yshift=-2.1in]current page.north east);
+    \draw[BookTeal,line width=1.5pt] ([yshift=-1.72in]current page.north west) -- ([yshift=-1.72in]current page.north east);
+    \draw[BookTeal,line width=2pt] ([xshift=1.2in,yshift=-0.95in]current page.north west) circle (0.52in);
+    \draw[BookTeal,opacity=0.55,line width=2pt] ([xshift=1.2in,yshift=-0.95in]current page.north west) circle (0.36in);
+    \draw[BookTeal,opacity=0.35,line width=2pt] ([xshift=1.2in,yshift=-0.95in]current page.north west) circle (0.22in);
+  \end{tikzpicture}
+  \vspace*{0.85in}
+  \begin{flushright}{\Huge\scshape\color{BookInk}#1}\end{flushright}
+  \vspace{0.7in}
+}

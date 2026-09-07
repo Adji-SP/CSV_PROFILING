@@ -1,0 +1,145 @@
+\chapter{Berkenalan dengan Server OTA Rust}
+
+\section{Baca main.rs seperti rutinitas membuka bengkel}
+
+Buka \codepath{ota-server/src/main.rs}. Sekilas berkas ini mungkin tampak resmi, padahal tugasnya mirip rutinitas membuka bengkel pada pagi hari. Nyalakan lampu. Buka lemari. Letakkan alat di meja. Buka pintu depan.
+
+Versi Rust menjalankan rutinitas tersebut dalam urutan berikut:
+
+\begin{enumerate}
+  \item Nyalakan logging agar terminal dapat menceritakan apa yang terjadi.
+  \item Baca pengaturan dari \codepath{.env}.
+  \item Buka basis data SQLite.
+  \item Siapkan builder firmware.
+  \item Siapkan coordinator yang mengawasi setiap build.
+  \item Masukkan bagian bersama itu ke \codepath{AppState}.
+  \item Hubungkan route HTTP.
+  \item Dengarkan alamat dan port yang sudah dikonfigurasi.
+\end{enumerate}
+
+Berikut bagian tengah rutinitas tersebut dengan beberapa rincian dilipat:
+
+\begin{lstlisting}[language=Rust]
+let config = Arc::new(Config::load()?);
+let storage = Storage::connect(&config.database_url()).await?;
+let builder = Arc::new(LocalFirmwareBuilder::new(/* settings */));
+let coordinator = Arc::new(BuildCoordinator::new(
+    storage.clone(),
+    builder,
+    config.project_dir.clone(),
+    config.build_dir.clone(),
+));
+
+let state = AppState { config, storage, coordinator };
+\end{lstlisting}
+
+Kata \codepath{Arc} berarti beberapa permintaan dapat memegang referensi bersama menuju object layanan yang sama dengan aman. Anda belum perlu menguasainya. Perhatikan bentuk besarnya: konfigurasi, penyimpanan, dan proses build bertemu dalam satu bundel state. Route handler menerima bundel itu ketika membutuhkannya.
+
+\section{Konfigurasi adalah halaman tata tertib rumah}
+
+Pindah ke \codepath{ota-server/src/config.rs}. Berkas ini membaca setiap pengaturan \codepath{OTA_...}, menyediakan nilai bawaan lokal, memeriksa isinya, dan menyelesaikan path folder dari root repositori.
+
+Berkas yang sama membuat \codepath{firmware-projects}, \codepath{firmware-builds}, dan \codepath{data} jika belum ada. Karena itu, salinan proyek yang masih baru dapat menyala tanpa meminta Anda membuat folder tersebut dengan tangan.
+
+Jika public URL tidak diisi, server mencoba mendeteksi alamat LAN yang masuk akal. Deteksi otomatis cukup nyaman pada jaringan rumah sederhana. \codepath{OTA_PUBLIC_BASE_URL} yang ditulis secara tegas lebih mudah dipahami ketika PC mempunyai Ethernet, Wi-Fi, virtual adapter, atau VPN sekaligus.
+
+Ketika startup berhasil, terminal menampilkan dua sudut pandang:
+
+\begin{lstlisting}[numbers=none]
+OTA Server running
+Local:
+http://localhost:7000
+
+LAN / public firmware URL:
+http://192.168.1.5:7000
+\end{lstlisting}
+
+Baris local dipakai browser pada PC. Baris LAN adalah alamat yang dapat dijangkau ESP32.
+
+\section{Route adalah label di meja penerima}
+
+Buka \codepath{ota-server/src/routes/mod.rs}. Berkas ini pendek karena pekerjaan utamanya memasangkan alamat dengan fungsi yang menanganinya.
+
+Pekerjaan tersebut dikelompokkan ke tiga berkas di dekatnya:
+
+\begin{description}
+  \item[\codepath{routes/firmware.rs}] Menerima ZIP proyek dan menyajikan firmware yang telah selesai.
+  \item[\codepath{routes/builds.rs}] Memulai build dan mengembalikan riwayat atau log build.
+  \item[\codepath{routes/devices.rs}] Mengingat board, heartbeat, deployment, pemeriksaan update, dan kemajuan OTA.
+\end{description}
+
+Cari baris berikut:
+
+\begin{lstlisting}[language=Rust,numbers=none]
+.route("/api/ota/status", get(status))
+\end{lstlisting}
+
+Baca dari kiri ke kanan: ketika permintaan GET tiba pada alamat tersebut, panggil \codepath{status}. Baris route lain memakai tata bahasa yang sama.
+
+\section{Mengapa browser diperbolehkan masuk}
+
+Halaman berasal dari port 5000 dan memanggil server pada port 7000. Browser menganggap keduanya sebagai origin berbeda. Karena itu, Axum membutuhkan aturan CORS yang menyebut origin dashboard yang dipercaya.
+
+Daftar bawaan berisi:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:5000
+http://127.0.0.1:5000
+\end{lstlisting}
+
+Jika frontend disajikan dari alamat lain, tambahkan origin yang tepat ke \codepath{OTA_ALLOWED_ORIGINS}. Kesalahan CORS dapat muncul di browser walaupun URL status Axum dapat dibuka secara normal pada tab tersendiri.
+
+\begin{warningbox}
+Jaga daftar origin tetap sempit. Jika setiap website diizinkan memanggil builder firmware lokal, kemudahan kecil pada browser berubah menjadi pintu terbuka yang tidak diperlukan.
+\end{warningbox}
+
+\section{Pesan kesalahan perlu berbicara dengan kalimat lengkap}
+
+Buka \codepath{ota-server/src/errors.rs}. Setiap kesalahan API biasa membawa status HTTP, kode pendek yang dapat dibaca mesin, dan pesan untuk manusia. Kesalahan juga dapat membawa rincian dan petunjuk.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_FIRMWARE_PROJECT",
+    "message": "Managed application entrypoint was not found",
+    "details": "src/main.rs"
+  }
+}
+\end{lstlisting}
+
+Frontend dapat menampilkan pesan tanpa menebak penyebabnya. Pengembang dapat memakai kode pendek dalam tes. Nomor status memberi kategori umum kepada client HTTP:
+
+\begin{description}
+  \item[400] Permintaan tidak dapat dibaca.
+  \item[404] Catatan yang disebut tidak ada.
+  \item[409] Permintaan bertabrakan dengan keadaan saat ini, misalnya build aktif kedua.
+  \item[413] Upload terlalu besar.
+  \item[422] Permintaan dapat dibaca, tetapi melanggar aturan proyek.
+  \item[500] Sesuatu di dalam server gagal secara tidak terduga.
+\end{description}
+
+\section{SQLite adalah buku catatan server}
+
+Berkas basis datanya adalah \codepath{data/ota.db}. Tabel tidak perlu dibuat dengan tangan. \codepath{storage.rs} melakukannya saat startup.
+
+Setiap tabel menjawab pertanyaan yang berbeda:
+
+\begin{longtable}{p{0.19\textwidth}p{0.7\textwidth}}
+\toprule
+Tabel & Pertanyaan yang dijawab\\
+\midrule
+\endhead
+projects & ZIP mana yang diunggah, untuk target dan versi apa?\\
+builds & Apa yang terjadi ketika proyek dicoba untuk dikompilasi?\\
+firmware & Binary berhasil mana yang dapat diunduh perangkat?\\
+devices & Board mana yang sudah memperkenalkan diri, dan apa laporan terakhirnya?\\
+deployments & Firmware mana ditugaskan kepada board mana, dan sudah sejauh apa prosesnya?\\
+\bottomrule
+\end{longtable}
+
+Foreign key SQLite mengikat halaman-halaman itu. Berkas firmware yang masih dipakai perangkat atau deployment tidak dapat dihapus sembarangan. API mengembalikan conflict, sehingga tidak ada halaman yang dicabut dari buku catatan sambil meninggalkan rujukan tanpa tujuan.
+
+\begin{checkpoint}
+Buka \codepath{main.rs}, \codepath{config.rs}, \codepath{routes/mod.rs}, dan \codepath{storage.rs} pada empat tab. Di setiap tab, cari satu bagian yang cocok dengan peran bab ini: startup, pengaturan, alamat, dan tabel basis data.
+\end{checkpoint}

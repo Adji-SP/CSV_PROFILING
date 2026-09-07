@@ -1,0 +1,132 @@
+\chapter{Let's Get It Running}
+
+\section{Begin with the computer}
+
+Leave the ESP32 unplugged for the moment. The first win is smaller: open the dashboard and make both PC services answer. Once that works, every later problem has fewer hiding places.
+
+You need Python 3.10 or newer for the CSV side and Rust for the OTA side. The embedded toolchain can wait until the dashboard is comfortable.
+
+\section{Prepare Python gently}
+
+A virtual environment gives this project its own box of Python packages. It keeps your other Python work out of the way.
+
+Open PowerShell in the repository and type the first line:
+
+\begin{lstlisting}
+py -3 -m venv python\.venv
+\end{lstlisting}
+
+When the command returns, look inside \codepath{python}. A new \codepath{.venv} folder should be there. Now install the packages named in \codepath{python/requirements.txt}:
+
+\begin{lstlisting}
+python\.venv\Scripts\python -m pip install -r python\requirements.txt
+\end{lstlisting}
+
+On Linux or macOS, the same two steps are:
+
+\begin{lstlisting}
+python3 -m venv python/.venv
+python/.venv/bin/pip install -r python/requirements.txt
+\end{lstlisting}
+
+The installation may take a while because data-profiling libraries bring several helpers with them. Wait for the command prompt to return. Red text near the middle can be a warning; the final lines tell you whether installation finished or failed.
+
+\section{Check the Rust tools you already have}
+
+Run one command at a time:
+
+\begin{lstlisting}
+cargo --version
+rustc --version
+\end{lstlisting}
+
+If both print a version, the PC can begin building the Axum server. Firmware needs two more checks later:
+
+\begin{lstlisting}
+rustc +esp --version
+espflash --version
+\end{lstlisting}
+
+Do not chase every missing embedded tool yet. The dashboard can still start, store projects, validate ZIP files, and show an honest failed-build message.
+
+\begin{mentorbox}[A Windows detail that surprises many people]
+The ESP Rust toolchain may be installed while Windows still lacks \codepath{link.exe}. That file comes with Visual Studio Build Tools and the Desktop development with C++ workload. If a build names \codepath{link.exe}, the Rust code is not necessarily at fault. The compiler is asking Windows for a native tool it cannot find.
+\end{mentorbox}
+
+\section{Make your private .env file}
+
+Copy \codepath{.env.example} and name the copy \codepath{.env}. This is your local settings page. It may hold a Wi-Fi password, so Git should ignore it.
+
+For the first start, pay attention to these lines:
+
+\begin{lstlisting}[language=TOML,numbers=none]
+OTA_BIND_ADDRESS=0.0.0.0
+OTA_PORT=7000
+OTA_PUBLIC_BASE_URL=http://192.168.1.5:7000
+
+WIFI_SSID=your-wifi-name
+WIFI_PASS=your-wifi-password
+DEVICE_NAME=ESP32-S3 Managed Device
+\end{lstlisting}
+
+Replace \codepath{192.168.1.5} with the LAN address of your own PC. On Windows, run \codepath{ipconfig} and look under the Wi-Fi or Ethernet adapter you are actually using. The useful address often begins with \codepath{192.168} or \codepath{10}.
+
+\begin{warningbox}[Why localhost will betray the device]
+On your PC, \codepath{localhost} means your PC. On the ESP32, the same word means the ESP32. Put the PC's LAN address in \codepath{OTA_PUBLIC_BASE_URL} and in the runtime's \codepath{OTA_SERVER_URL}.
+\end{warningbox}
+
+The rest of \codepath{.env.example} already points to sensible local folders. Leave those values alone during your first run.
+
+\section{Press the project's start button}
+
+Windows users can run:
+
+\begin{lstlisting}
+.\run-dev.bat
+\end{lstlisting}
+
+Two terminals should open. One says CSV Profiler and uses port 5000. The other compiles and starts the Rust OTA server on port 7000. The first Rust build may be quiet for a while because Cargo is preparing dependencies.
+
+Linux and macOS users can run:
+
+\begin{lstlisting}
+chmod +x run-dev.sh
+./run-dev.sh
+\end{lstlisting}
+
+When both helpers are ready, open \codepath{http://localhost:5000}. You should see the sidebar and the CSV upload page.
+
+\section{Ask each service a tiny question}
+
+The dashboard itself proves Flask is answering. Give Axum a similarly small test by opening:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+The browser should show JSON. Do not worry about every field yet. Find \codepath{"status":"online"} and check that \codepath{public_base_url} carries your LAN address.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "service": "CSV_PROFILING OTA Server",
+  "status": "online",
+  "public_base_url": "http://192.168.1.5:7000",
+  "supported_targets": ["esp32s3"]
+}
+\end{lstlisting}
+
+\section{If the page refuses to open}
+
+Do not restart everything at once. Look at one door at a time.
+
+First, visit \codepath{http://127.0.0.1:5000}. If it also fails, read the Flask terminal. A missing Python package usually names itself there.
+
+If the dashboard opens but its OTA light says offline, visit the status URL on port 7000. Read the Rust terminal if that address fails. Cargo may still be compiling, another program may own the port, or configuration may have stopped startup.
+
+If both addresses work on the PC and the ESP32 later cannot connect, move your attention to the LAN address, firewall, and Wi-Fi network. That is a different door.
+
+Open the dashboard through HTTP. Double-clicking \codepath{web/index.html} creates a \codepath{file:///} page with a different browser origin and can make good API code look broken.
+
+\begin{checkpoint}
+Keep two tabs open. The first shows \codepath{http://localhost:5000}. The second shows Axum's status JSON. Point to the two matching terminal windows. You now have a clean starting line, even if no ESP32 is connected.
+\end{checkpoint}

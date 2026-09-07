@@ -1,0 +1,109 @@
+\chapter{Meet the Project Before We Touch It}
+
+\section{One dashboard, two helpers}
+
+Open the dashboard in your browser. It looks like one application because every page shares the same sidebar, colors, and buttons. Behind that screen sit two separate helpers.
+
+The Python helper listens on port 5000. Give it a CSV file and it will inspect the rows, calculate summaries, build a report, and apply cleaning choices. The Rust helper listens on port 7000. Give it a firmware project and it will guard the upload, run the build tools, save the finished binary, and remember which device should receive it.
+
+Picture a small repair shop with one front desk and two workbenches. The front desk is the browser. One bench handles data. The other handles firmware.
+
+\begin{center}
+\begin{tcolorbox}[width=0.9\textwidth,colback=BookPaper,colframe=BookTealLight,arc=3pt]
+\centering\ttfamily
+You, using the dashboard at :5000\par
+\vspace{0.25em}
+$\swarrow$\hspace{7em}$\searrow$\par
+\vspace{0.25em}
+Flask + Pandas :5000\hspace{3em}Axum :7000\par
+CSV work\hspace{8em}firmware work\par
+\hspace*{13em}$\downarrow$\par
+\hspace*{11em}ESP32-S3 on Wi-Fi
+\end{tcolorbox}
+\end{center}
+
+Keeping the benches separate protects the CSV profiler. Adding a firmware feature does not require us to rebuild the data service in Rust. The browser only needs to know which address to call.
+
+\begin{mentorbox}[A name you will see often]
+Developers call the handoff between two programs a \emph{service boundary}. Here the boundary is simply an HTTP request. The phrase sounds formal; the idea is ordinary. One program asks another program to do a clearly named job.
+\end{mentorbox}
+
+\section{Follow a CSV file with your finger}
+
+Suppose you choose \codepath{readings.csv} and press Run Profiling. The browser sends the file to Flask. Flask saves a working copy and starts the slower profiling work in the background. While Pandas reads the data, the browser receives progress messages. When the report is ready, Flask serves the finished HTML page.
+
+Every later CSV action returns to the same helper. Previous Runs asks Flask for saved sessions. Cleaning asks Flask to change a working copy. The playground asks Flask to perform a small Pandas operation.
+
+You can remember the route in one line:
+
+\begin{center}
+\ttfamily browser $\rightarrow$ Flask $\rightarrow$ Pandas $\rightarrow$ report
+\end{center}
+
+\section{Now follow a firmware ZIP}
+
+The OTA journey begins with a ZIP because a Rust program is more than one source file. It may have a Cargo manifest, extra modules, and library dependencies. The browser sends that ZIP, a board choice, and a version to Axum.
+
+Axum checks the archive before opening it. Then it asks Cargo to compile the project for the ESP32-S3. Cargo produces an ELF executable. \codepath{espflash} turns that ELF into an ESP-IDF application image. The server calculates a SHA-256 fingerprint and saves the binary under \codepath{firmware-builds}.
+
+Later, the device asks whether an update is waiting. If one is assigned, the ESP32 downloads the \codepath{.bin}. It never receives the ZIP or a loose \codepath{.rs} file.
+
+\begin{center}
+\ttfamily ZIP $\rightarrow$ Cargo $\rightarrow$ ELF $\rightarrow$ application .bin $\rightarrow$ ESP32
+\end{center}
+
+\section{Use the folders as signposts}
+
+Keep this table nearby during your first few sessions. You only need the first sentence for each folder.
+
+\begin{longtable}{>{\ttfamily\footnotesize\raggedright\arraybackslash}p{0.39\textwidth}p{0.53\textwidth}}
+\toprule
+Folder or file & What lives there\\
+\midrule
+\endhead
+web/ & The pages you see: HTML, CSS, and browser JavaScript.\\
+python/profiler\_server.py & Flask routes and all existing CSV work.\\
+ota-server/ & The Axum server, database code, ZIP checks, build runner, and device API.\\
+firmware-projects/ & Private working folders made when Axum extracts uploads.\\
+firmware-builds/ & Finished OTA application binaries.\\
+data/ota.db & The SQLite notebook where Axum remembers projects, builds, firmware, devices, and deployments.\\
+examples/esp32-rust-ota-client/ & The steady base program installed on the board and reused for managed builds.\\
+examples/uploaded-firmware-basic/ & The smallest application ZIP you can study and upload.\\
+examples/uploaded-firmware-with-libs/ & A second application showing extra Cargo libraries.\\
+docs/OTA\_GUIDE.md & Shorter engineering notes about partitions, rollback, and networking.\\
+\bottomrule
+\end{longtable}
+
+The three storage folders fill themselves while the system runs. Your hand-written source belongs in \codepath{web}, \codepath{python}, \codepath{ota-server}, or an application project under \codepath{examples}.
+
+\section{Which main program is the real main program?}
+
+There are three programs running in three places. The browser runs JavaScript. The PC runs Flask and Axum. The ESP32 runs one compiled firmware image.
+
+Inside that firmware image, \codepath{examples/esp32-rust-ota-client/src/main.rs} owns the true executable \codepath{fn main()}. Your uploaded application also keeps a file named \codepath{src/main.rs}, but it exports two callable functions named \codepath{setup} and \codepath{main}. During the build, Rust links those functions into the stable runtime.
+
+Think of the runtime as a house with its wiring already installed. Your uploaded application decides what happens in the rooms. The final build produces one complete house. No second program balances on top of it.
+
+\section{Why the first flash uses USB}
+
+A new ESP32 does not know your Wi-Fi name. It has no address for the OTA server and no two-slot OTA partition table. USB gives it that first foundation: bootloader, partitions, Wi-Fi-aware runtime, and a small default application.
+
+After the first successful flash, the board can introduce itself to the server and ask for later releases over Wi-Fi.
+
+\begin{mentorbox}[The short answer]
+Yes, flash the stable runtime to the ESP32-S3 first. You normally do this once while provisioning the board. OTA can take over after the device can join the network and reach port 7000 on your PC.
+\end{mentorbox}
+
+\section{Who gets the Wi-Fi modem?}
+
+The ESP32 has a single modem resource. The runtime takes it once and gives it to \codepath{wifi-manager}. That manager keeps the connection alive for heartbeats and OTA checks. Your application receives the network's current state through \codepath{AppContext}, along with the remaining pins and hardware controllers it may use.
+
+This arrangement leaves room for a friendlier Wi-Fi setup screen later. Saved credentials, reconnect rules, or a captive portal can stay inside the manager. Sensor applications can remain focused on sensors.
+
+\begin{warningbox}
+Do not call \codepath{Peripherals::take()} inside an uploaded application. The runtime has already taken the global set. Reach for \codepath{context.peripherals} and take only the pin or controller your application needs.
+\end{warningbox}
+
+\begin{checkpoint}
+Open the repository and find these four places: \codepath{web/index.html}, \codepath{python/profiler_server.py}, \codepath{ota-server/src/main.rs}, and \codepath{examples/esp32-rust-ota-client/src/main.rs}. Say aloud which machine runs each one. That small sentence prevents a great deal of confusion later.
+\end{checkpoint}

@@ -1,0 +1,116 @@
+\chapter{Menyatukan Seluruh Alur}
+
+\section{Kosongkan sedikit ruang di meja}
+
+Sekarang waktunya menjalankan seluruh perjalanan. Siapkan PC, ESP32-S3, kabel USB data, dan informasi Wi-Fi. Buka satu terminal untuk Flask dan satu terminal untuk Axum. Sisakan ruang bagi terminal ketiga ketika serial monitor muncul.
+
+Tidak ada hadiah untuk orang yang paling terburu-buru. Di akhir setiap tahap, carilah bukti kecil yang disebutkan pada halaman ini. Jika buktinya belum terlihat, tetaplah di tahap tersebut.
+
+\section{Tahap satu: bangunkan kedua layanan PC}
+
+Buka \codepath{.env}. Periksa alamat LAN PC, nama Wi-Fi, kata sandi Wi-Fi, dan nama perangkat. Setelah itu, jalankan proyek:
+
+\begin{lstlisting}[numbers=none]
+# Windows
+.\run-dev.bat
+
+# Linux or macOS
+./run-dev.sh
+\end{lstlisting}
+
+Buka dua alamat ini:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:5000
+http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+\textbf{Yang perlu dilihat:} tab pertama menampilkan dashboard. Tab kedua mengatakan layanan OTA online dan mencetak public URL dengan alamat LAN yang benar.
+
+\section{Tahap dua: periksa kesehatan jalur CSV lama}
+
+Upload \codepath{sensor-readings.csv} kecil dari Bab 4. Perhatikan progress, buka laporan, lalu jalankan preview di playground. Kunjungi Previous Runs dan pastikan sesinya tercantum.
+
+\textbf{Yang perlu dilihat:} berpindah ke OTA Firmware lalu kembali lagi tidak menghilangkan sesi CSV. Bukti kecil ini menunjukkan bahwa halaman baru tetap menghormati pekerjaan Flask yang sudah ada.
+
+\section{Tahap tiga: bungkus aplikasi basic}
+
+Di Windows PowerShell:
+
+\begin{lstlisting}
+Compress-Archive \
+  -Path examples\uploaded-firmware-basic\* \
+  -DestinationPath uploaded-firmware-basic.zip
+\end{lstlisting}
+
+Buka ZIP tersebut. Tingkat pertamanya harus memperlihatkan \codepath{Cargo.toml}, \codepath{ota-app.toml}, dan \codepath{src}.
+
+Masuk ke OTA Firmware. Pilih ZIP, pilih ESP32-S3, ketik versi \codepath{1.0.1}, lalu tekan Upload \& Build.
+
+\textbf{Yang perlu dilihat:} badge bergerak dari uploading menuju queued dan building. Terminal dimulai dengan versi alat dan mode managed application. Baris compiler yang sebenarnya akan menyusul.
+
+Jika build gagal, simpan catatannya. Cari kesalahan pertama yang berguna dan perbaiki kondisi tersebut. Jangan menciptakan sukses palsu dengan mengedit SQLite atau meletakkan binary acak di \codepath{firmware-builds}.
+
+\section{Tahap empat: periksa hasil build yang berhasil}
+
+Ketika badge mencapai success, lihat tabel firmware. Baris baru seharusnya berisi versi \codepath{1.0.1}, target ESP32-S3, nama berkas, ukuran byte, SHA-256, waktu, dan status Ready.
+
+Di balik layar, Anda akan menemukan:
+
+\begin{itemize}
+  \item upload yang diekstrak di bawah \codepath{firmware-projects};
+  \item generated managed workspace di dalam folder proyek tersebut;
+  \item application binary di bawah \codepath{firmware-builds};
+  \item baris project, build, dan firmware yang cocok di \codepath{data/ota.db}.
+\end{itemize}
+
+Tekan Download satu kali. Jumlah byte hasil download harus sama dengan angka pada tabel.
+
+\section{Tahap lima: berikan program dasar pertama kepada board}
+
+Di sinilah kita menyentuh batas fisik. Tinjau \codepath{examples/esp32-rust-ota-client/partitions.csv}, lalu bandingkan dengan ukuran flash board. Hubungkan board memakai kabel data.
+
+Atur nilai runtime, kemudian lakukan flash:
+
+\begin{lstlisting}
+cd examples\esp32-rust-ota-client
+$env:WIFI_SSID="your-ssid"
+$env:WIFI_PASS="your-password"
+$env:OTA_SERVER_URL="http://192.168.1.5:7000"
+$env:DEVICE_NAME="Tutorial sensor"
+cargo +esp run --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+Ganti contoh IP sebelum menekan Enter.
+
+\begin{warningbox}
+Perintah ini menulis ke board yang terhubung. Pastikan chip, port serial, ukuran flash, tabel partisi, dan catu daya stabil. Jangan memakai ulang tabel partisi contoh pada produk yang sudah berisi data sebelum seluruh data partition-nya disesuaikan.
+\end{warningbox}
+
+\textbf{Yang perlu dilihat:} terminal serial menunjukkan startup dan koneksi Wi-Fi. Tidak lama kemudian, board muncul pada halaman Devices bersama versi dan alamat IP saat ini.
+
+\section{Tahap enam: tinggalkan pesan update}
+
+Buka Devices, lalu tekan Deploy OTA untuk board baru. Pilih baris firmware versi \codepath{1.0.1}.
+
+Kartu pertama-tama menampilkan Pending. Runtime memeriksa setiap tiga puluh detik, jadi berikan sedikit waktu. Sesudah itu, perhatikan status Downloading, Verifying, Installing, dan Rebooting.
+
+Serial monitor mungkin menghilang sebentar saat restart. Buka lagi jika diperlukan. Image baru menjalankan setup aplikasi, menandai slot sebagai valid, lalu memulai main loop yang diunggah.
+
+\textbf{Yang perlu dilihat:} kartu perangkat mencapai Success dan current version berubah menjadi \codepath{1.0.1}. Output serial memuat pesan siklus dari aplikasi basic.
+
+\section{Tahap tujuh: ubah sesuatu yang mudah dikenali}
+
+Salin aplikasi basic. Ganti baris log dengan pesan yang langsung Anda kenali, misalnya nama ruangan atau sensor. Build sebagai \codepath{1.0.2}, kemudian deploy.
+
+Setelah reboot, cari pesan baru di serial monitor. Inilah momen yang menyenangkan: source dari ZIP Anda sedang berjalan di dalam image firmware lengkap yang dibangun oleh PC.
+
+Untuk mencoba dependensi, gunakan \codepath{examples/uploaded-firmware-with-libs}. Contoh itu sudah memperlihatkan \codepath{heapless}, Serde, dan JSON.
+
+\section{Tuliskan bukti selagi masih segar}
+
+Catatan lab singkat dapat menyelamatkan satu sore pada percobaan berikutnya. Tulis build ID, firmware ID, versi, ukuran byte, hash, device ID, versi lama dan baru, model board, versi alat, serta pesan serial terakhir. Jika suatu tahap membutuhkan perbaikan, sertakan kesalahan asli dan solusi yang benar-benar bekerja.
+
+\begin{checkpoint}[Seluruh perjalanan]
+Lab selesai ketika laporan CSV masih bekerja, build dengan toolchain asli menghasilkan firmware, perangkat yang telah diprovisi secara fisik mendaftar, deployment berubah menjadi update manifest, perangkat melakukan streaming dan verifikasi binary, lalu image setelah reboot melaporkan versi \codepath{1.0.1} atau yang lebih baru.
+\end{checkpoint}

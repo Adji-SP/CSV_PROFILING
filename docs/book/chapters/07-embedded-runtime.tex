@@ -1,0 +1,125 @@
+\chapter{The Program That Lives on the ESP32}
+
+\section{Give the board a dependable base}
+
+Take the ESP32-S3 in your hand. Before OTA can help us, this board needs a program that knows how to join Wi-Fi, find the PC, and write a new image safely. That first program is the stable runtime under \codepath{examples/esp32-rust-ota-client}.
+
+The word \emph{stable} does not mean it can never change. It means ordinary product updates should not have to rewrite its plumbing. It looks after:
+
+\begin{itemize}
+  \item ESP-IDF startup and logs;
+  \item the Wi-Fi connection;
+  \item device identity and heartbeats;
+  \item update checks and downloads;
+  \item the two OTA application slots;
+  \item hash verification, reboot, and rollback;
+  \item the moment your uploaded application begins running.
+\end{itemize}
+
+Your application can then spend its attention on a sensor, motor, display, or other product job.
+
+\section{The first journey goes through USB}
+
+Open PowerShell in the runtime directory. Fill in values for the network and the reachable server address:
+
+\begin{lstlisting}
+cd examples\esp32-rust-ota-client
+$env:WIFI_SSID="your-ssid"
+$env:WIFI_PASS="your-password"
+$env:OTA_SERVER_URL="http://192.168.1.5:7000"
+$env:DEVICE_NAME="Sensor node"
+\end{lstlisting}
+
+Check the IP carefully. It belongs to the PC running Axum.
+
+When the board, cable, and partition table are ready, this command builds, flashes, and opens the monitor:
+
+\begin{lstlisting}
+cargo +esp run --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+The configured Cargo runner calls \texttt{espflash flash --monitor}. The first flash can install the bootloader and partition layout as well as the application.
+
+\begin{warningbox}[Stop and identify the board]
+Flashing writes to physical hardware. Confirm that the connected board is an ESP32-S3, the USB cable carries data, the flash size matches the partition plan, and the selected serial port belongs to this board.
+\end{warningbox}
+
+When the runtime boots, the serial terminal should show Wi-Fi activity. After it receives an IP address, it registers with Axum. Refresh Devices in the dashboard and look for the name you supplied.
+
+\section{Read the true fn main like a story}
+
+Open \codepath{examples/esp32-rust-ota-client/src/main.rs}. The function begins here:
+
+\begin{lstlisting}[language=Rust,numbers=none]
+fn main() -> Result<()> {
+    esp_idf_svc::sys::link_patches();
+    EspLogger::initialize_default();
+    // platform setup continues...
+}
+\end{lstlisting}
+
+Continue down the file slowly. The runtime takes the board's peripherals, separates the modem, starts the system event loop and NVS, then constructs \codepath{WifiManager}. It derives a device ID from the station MAC unless you supplied one.
+
+Next it builds \codepath{AppContext}. This is the bag handed to your application. Before calling your application, it asks ESP-IDF whether the current image is new and still waiting for validation.
+
+Then comes the handoff:
+
+\begin{lstlisting}[language=Rust]
+let application_state = device_app::setup(&mut context)?;
+
+if unverified_image {
+    mark_running_image_valid()?;
+}
+
+// Start the OTA supervisor in its own thread.
+device_app::main(context, application_state)
+\end{lstlisting}
+
+The real source contains fuller error handling. The shape above is the part to remember: prepare, test application setup, approve the new slot, keep OTA alive, and enter the application's main loop.
+
+\section{Open the smaller crates}
+
+The runtime is divided so each piece can be held in your head:
+
+\begin{description}
+  \item[\codepath{crates/application-api}] Defines what the application is allowed to receive.
+  \item[\codepath{crates/wifi-manager}] Owns the modem and keeps trying when the network drops.
+  \item[\codepath{crates/ota-runtime}] Talks to Axum and writes an update into the inactive slot.
+  \item[\codepath{applications/default-app}] Supplies the small behavior used during the first USB flash.
+\end{description}
+
+You can open one crate without reading the others. This is especially useful when a Wi-Fi problem and a sensor problem happen on the same day.
+
+\section{AppContext is the handover bag}
+
+The application receives this broad shape:
+
+\begin{lstlisting}[language=Rust]
+pub struct AppContext {
+    pub device: DeviceInfo,
+    pub network: NetworkHandle,
+    pub peripherals: ApplicationPeripherals,
+}
+\end{lstlisting}
+
+\codepath{device} tells the application its ID, friendly name, chip, and firmware version. \codepath{network} lets it ask whether Wi-Fi is connected and which IP was last reported. \codepath{peripherals} carries the available pins and controllers.
+
+Each hardware item is wrapped in \codepath{Option}. When your setup function takes I2C0, that option becomes empty. The code now has a visible record that one part of the application owns that controller.
+
+The modem is missing from the bag on purpose. \codepath{wifi-manager} keeps it so heartbeat and OTA polling can continue while your application runs.
+
+\begin{mentorbox}[Would a Wi-Fi manager become a problem?]
+It becomes helpful when ownership stays in one place. The current manager already owns the modem, event loop, NVS-backed Wi-Fi service, and reconnect loop. A future setup access point or captive portal can grow there. Uploaded applications can keep reading the same network handle.
+\end{mentorbox}
+
+\section{A new flash does not stack old code}
+
+Imagine two labeled drawers, \codepath{ota_0} and \codepath{ota_1}. The board runs one drawer while the updater writes a complete image into the other. After verification and reboot, the drawers trade roles.
+
+The newly written image contains the runtime and the chosen application together. It replaces the inactive slot from beginning to end. Old structs, functions, and libraries do not remain loaded beside the new program.
+
+The previous active drawer stays available for rollback until the new image proves it can start. On the next release, ESP-IDF may overwrite that older drawer. The PC can keep a long firmware history in SQLite, while the board still has only its two application slots.
+
+\begin{checkpoint}
+Before connecting hardware, find the runtime's \texttt{fn main}, the call to \codepath{device_app::setup}, the call to \codepath{device_app::main}, and the place where the modem is separated from application peripherals. Trace them in that order with your finger.
+\end{checkpoint}

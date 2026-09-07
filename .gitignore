@@ -1,10 +1,29 @@
 python/.venv/
 python/__pycache__/
+.env
 
-uploads/*
-!/uploads/Placeholder.txt
+python/uploads/*
+!python/uploads/Placeholder.txt
 
-reports/*
-!/reports/Placeholder.txt
+python/reports/*
+!python/reports/Placeholder.txt
 
-doc/*
+ota-server/target/
+firmware-projects/*
+!firmware-projects/.gitkeep
+firmware-builds/*
+!firmware-builds/.gitkeep
+data/*
+!data/.gitkeep
+
+examples/esp32-rust-ota-client/target/
+examples/esp32-rust-ota-client/.embuild/
+
+# LaTeX handbook intermediates; keep the compiled PDF.
+docs/book/*.aux
+docs/book/*.log
+docs/book/*.out
+docs/book/*.toc
+docs/book/*.fls
+docs/book/*.fdb_latexmk
+docs/book/chapters/*.aux

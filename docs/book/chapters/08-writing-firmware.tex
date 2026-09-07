@@ -1,0 +1,164 @@
+\chapter{Write Your First Uploaded Firmware}
+
+\section{Copy the small example before starting from nothing}
+
+Open \codepath{examples/uploaded-firmware-basic}. It contains only the pieces the server expects:
+
+\begin{lstlisting}[numbers=none]
+Cargo.toml
+ota-app.toml
+src/
+  main.rs
+\end{lstlisting}
+
+Copy this folder somewhere safe and give the Cargo package a new name. Beginning from a working example lets you change one idea at a time.
+
+The descriptor tells Axum how to treat the project:
+
+\begin{lstlisting}[language=TOML,numbers=none]
+schema_version = 1
+application_api_version = 2
+entrypoint = "src/main.rs"
+\end{lstlisting}
+
+Leave these values as they are for your first application.
+
+\section{Your program still feels like main.rs}
+
+Open \codepath{src/main.rs}. There is no application class and no framework trait to implement. You write two public functions.
+
+\begin{lstlisting}[language=Rust]
+use anyhow::Result;
+use firmware_app_api::AppContext;
+
+pub fn setup(context: &mut AppContext) -> Result<u64> {
+    log::info!("Hello from {}", context.device.device_id);
+    Ok(0)
+}
+
+pub fn main(context: AppContext, mut count: u64) -> Result<()> {
+    loop {
+        count += 1;
+        log::info!(
+            "count={count}, wifi={}",
+            context.network.is_connected()
+        );
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+}
+\end{lstlisting}
+
+\codepath{setup} runs once after the runtime has prepared the board. \codepath{main} is your long-running loop. The stable entrypoint calls both for you.
+
+Change the hello message. That one line is enough for a first personalized build.
+
+\section{The value between setup and main is your toolbox}
+
+The example returns a number from setup and receives it as \codepath{count} in main. That number is the application state.
+
+Your own state can be as small as \codepath{()} when nothing needs to be carried. It can also be a struct containing a sensor driver, counters, buffers, or display state.
+
+\begin{lstlisting}[language=Rust]
+pub struct State {
+    sample_number: u64,
+    alarm_enabled: bool,
+}
+
+pub fn setup(context: &mut AppContext) -> Result<State> {
+    log::info!("Preparing peripherals for {}", context.device.name);
+    Ok(State {
+        sample_number: 0,
+        alarm_enabled: true,
+    })
+}
+
+pub fn main(context: AppContext, mut state: State) -> Result<()> {
+    loop {
+        state.sample_number += 1;
+        // Read the sensor and do your real work here.
+    }
+}
+\end{lstlisting}
+
+This is ordinary Rust data, not a class required by the OTA system.
+
+\section{Take a peripheral during setup}
+
+Suppose the application needs I2C0 and some pins. The beginning may look like this:
+
+\begin{lstlisting}[language=Rust]
+use anyhow::{Context, Result};
+
+pub fn setup(context: &mut AppContext) -> Result<State> {
+    let pins = context.peripherals.pins.take()
+        .context("GPIO pins were already taken")?;
+    let i2c0 = context.peripherals.i2c0.take()
+        .context("I2C0 was already taken")?;
+
+    // Construct the ESP-IDF I2C driver and sensor here.
+    // Return the finished driver inside State.
+}
+\end{lstlisting}
+
+The calls to \codepath{take()} move those resources into your code. If setup is called with a missing resource, it returns a readable error. On a brand-new OTA image, that error can trigger rollback.
+
+Keep fallible driver construction and a short startup check in setup. Do not let setup loop forever. The runtime needs a clear success or failure before it can approve the new slot.
+
+\begin{warningbox}
+Return owned state from setup. A reference borrowed from \codepath{AppContext} cannot safely outlive the mutable setup call when the context later moves into main. Real ESP-IDF drivers may need careful lifetime and type aliases; follow the driver crate's example for your exact chip and pins.
+\end{warningbox}
+
+\section{Add ordinary Cargo libraries}
+
+Yes, your uploaded application can use libraries. Open \codepath{examples/uploaded-firmware-with-libs/Cargo.toml}:
+
+\begin{lstlisting}[language=TOML,numbers=none]
+[dependencies]
+anyhow = "1"
+firmware-app-api = "0.1"
+heapless = "0.8"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+\end{lstlisting}
+
+That example keeps samples in a fixed-capacity queue and turns telemetry into JSON. Sensor drivers, \codepath{embedded-hal} helpers, compact collections, and serialization crates can work the same way.
+
+The library must support \codepath{xtensa-esp32s3-espidf}. A desktop crate that assumes a mouse, filesystem, or full operating system may compile poorly or make little sense on the board. Check the crate's examples and features.
+
+If you use a local path dependency, include its whole folder inside the ZIP. The path must stay under the uploaded project root. Axum rejects paths that reach outside the archive.
+
+\begin{mentorbox}[Why firmware-app-api looks like a normal dependency]
+The uploaded manifest uses \codepath{firmware-app-api = "0.1"} as a portable placeholder. In its private build copy, Axum points that name to the matching API crate inside the stable runtime. Your original manifest is left alone.
+\end{mentorbox}
+
+\section{Give the release a useful version}
+
+The version typed into the dashboard becomes the firmware version compiled into the managed runtime and stored in SQLite. Begin with a calm sequence such as \codepath{1.0.0}, \codepath{1.0.1}, and \codepath{1.1.0}.
+
+Deployment selects a specific firmware ID. The current server checks whether the desired version equals the device's current version; it does not sort semantic versions and choose one by itself.
+
+\section{Zip the contents, not the outer shelf}
+
+On Windows PowerShell:
+
+\begin{lstlisting}
+Compress-Archive \
+  -Path examples\uploaded-firmware-basic\* \
+  -DestinationPath uploaded-firmware-basic.zip
+\end{lstlisting}
+
+On Linux or macOS:
+
+\begin{lstlisting}
+cd examples/uploaded-firmware-basic
+zip -r ../../uploaded-firmware-basic.zip \
+  Cargo.toml ota-app.toml src README.md
+\end{lstlisting}
+
+Open the ZIP and check its first level. You should immediately see \codepath{Cargo.toml}, \codepath{ota-app.toml}, and \codepath{src}. Upload it on OTA Firmware. The device will receive the later \codepath{.bin}, never this ZIP.
+
+\begin{checkpoint}
+Make a copy of the basic example. Change its package name and hello message. Let setup return a small state struct of your own. Zip the contents and upload version \codepath{1.0.1}. The upload response should say \codepath{managed_application}, API version 2, and \codepath{src/main.rs}.
+\end{checkpoint}
+

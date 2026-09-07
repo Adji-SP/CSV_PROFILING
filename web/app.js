@@ -21,7 +21,10 @@ const analyseBtn    = document.getElementById("analyse-btn");
 const newAnalysisBtn= document.getElementById("new-analysis");
 const navProfiler   = document.getElementById("nav-profiler");
 const navRuns       = document.getElementById("nav-runs");
-const navSettings   = document.getElementById("nav-settings");
+const navOta        = document.getElementById("nav-ota");
+const navDevices    = document.getElementById("nav-devices");
+const navBuilds     = document.getElementById("nav-builds");
+const breadcrumbCurrent = document.getElementById("breadcrumb-current");
 
 const progressBar   = document.getElementById("progress-bar");
 const progressPct   = document.getElementById("progress-pct");
@@ -281,35 +284,59 @@ removeFileBtn.addEventListener("click", (e) => { e.stopPropagation(); clearFile(
 
 navProfiler?.addEventListener("click", (e) => {
   e.preventDefault();
-  showSection("upload-section");
+  showSection("upload-section", "profiler");
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
 navRuns?.addEventListener("click", (e) => {
   e.preventDefault();
-  showSection("upload-section");
-  setActiveNav("runs");
+  showSection("upload-section", "runs");
   document.querySelector(".sessions-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
-navSettings?.addEventListener("click", (e) => {
+navOta?.addEventListener("click", (e) => {
   e.preventDefault();
-  showToast("Settings are not available yet.", "", 2500);
+  showSection("ota-section", "ota");
+  if (typeof loadOtaDashboard === "function") loadOtaDashboard();
+});
+
+navDevices?.addEventListener("click", (e) => {
+  e.preventDefault();
+  showSection("devices-section", "devices");
+  if (typeof loadDevices === "function") loadDevices();
+});
+
+navBuilds?.addEventListener("click", (e) => {
+  e.preventDefault();
+  showSection("builds-section", "builds");
+  if (typeof loadBuildHistory === "function") loadBuildHistory();
 });
 
 // -- Section helpers -------------------------------------------
-function showSection(id) {
-  ["upload-section","progress-section","report-section"].forEach((sid) => {
+function showSection(id, activeNav = null) {
+  ["upload-section","progress-section","report-section","ota-section","devices-section","builds-section"].forEach((sid) => {
     document.getElementById(sid).classList.toggle("hidden", sid !== id);
   });
   newAnalysisBtn.style.display = id === "report-section" ? "inline-block" : "none";
-  setActiveNav("profiler");
+  const sectionMeta = {
+    "upload-section":   { nav: activeNav || "profiler", title: activeNav === "runs" ? "CSV Runs" : "CSV Profiler" },
+    "progress-section": { nav: "profiler", title: "Profiling Progress" },
+    "report-section":   { nav: "profiler", title: "EDA Report" },
+    "ota-section":      { nav: "ota", title: "OTA Firmware" },
+    "devices-section":  { nav: "devices", title: "Devices" },
+    "builds-section":   { nav: "builds", title: "Build History" },
+  }[id];
+  setActiveNav(sectionMeta?.nav || "profiler");
+  if (breadcrumbCurrent && sectionMeta) breadcrumbCurrent.textContent = sectionMeta.title;
   if (id === "upload-section") loadSessionsTable();
 }
 
 function setActiveNav(active) {
   navProfiler?.classList.toggle("active", active === "profiler");
   navRuns?.classList.toggle("active", active === "runs");
+  navOta?.classList.toggle("active", active === "ota");
+  navDevices?.classList.toggle("active", active === "devices");
+  navBuilds?.classList.toggle("active", active === "builds");
 }
 
 function setProgress(pct, label) {

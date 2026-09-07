@@ -1,0 +1,88 @@
+\chapter{Arah Pengembangan Berikutnya}
+
+\section{Pilih satu sambungan dan biarkan bagian lain tenang}
+
+Proyek ini sudah terbagi pada sambungan yang berguna. Pengembangan yang baik mengubah bagian terkecil yang bertanggung jawab dan membiarkan tetangganya memakai kontrak yang sudah dikenal.
+
+Sebelum menulis kode, lengkapi kalimat ini: ``Perilaku baru berada di \underline{\hspace{4cm}} karena bagian tersebut sudah memiliki \underline{\hspace{4cm}}.''
+
+Jika jawabannya kredensial Wi-Fi, buka \codepath{wifi-manager}. Jika jawabannya alamat HTTP baru, buka \codepath{routes}. Jika jawabannya lingkungan build baru, buka implementasi \codepath{FirmwareBuilder}.
+
+\section{Sambut chip ESP32 lain}
+
+Daftar board saat ini berisi ESP32-S3. Menambahkan target kedua memerlukan lebih dari satu pilihan baru di dropdown.
+
+Tambahkan nama yang diterima ke validasi target. Berikan Rust target dan chip \codepath{espflash} yang tepat kepada \codepath{TargetSpec}. Tambahkan pilihan board di frontend. Setelah itu, buat pemisahan peripheral runtime yang sesuai dengan chip asli, contoh partisi, dan konfigurasi rollback.
+
+ESP32-C3, misalnya, memakai RISC-V dan tidak membawa kumpulan hardware yang sama dengan S3. Application API hanya boleh menjanjikan sumber daya yang benar-benar dimiliki board.
+
+Mulailah dengan aplikasi kosong yang sudah diketahui bekerja. Buktikan build dan serial flash terlebih dahulu, kemudian uji OTA dan rollback.
+
+\section{Ubah setup Wi-Fi menjadi alur pertama yang ramah}
+
+Manager saat ini menerima kredensial pada waktu build dan melakukan reconnect bila diperlukan. Board masa depan dapat bertingkah seperti perangkat rumah baru:
+
+\begin{enumerate}
+  \item Cari kredensial tersimpan di NVS.
+  \item Coba jaringan tersimpan selama waktu yang terbatas.
+  \item Nyalakan setup access point sementara jika tidak ada jaringan yang berhasil.
+  \item Tampilkan halaman kecil tempat pemilik memilih Wi-Fi.
+  \item Simpan kredensial lalu kembali ke station mode.
+  \item Terbitkan setiap perubahan melalui network handle yang sudah ada.
+\end{enumerate}
+
+Biarkan modem, event loop, NVS, dan layanan Wi-Fi berada di dalam \codepath{wifi-manager}. Aplikasi sensor tidak perlu ikut mempelajari kode captive portal.
+
+\section{Bawa terminal ESP32 ke dashboard}
+
+Ada dua jalan yang berguna. Keduanya memperlihatkan bagian perjalanan yang berbeda.
+
+\subsection{Jalan pertama: serial bridge pada PC}
+
+Sebuah layanan lokal kecil membuka port COM atau tty yang dipilih, membaca baris, lalu mengalirkannya ke browser dengan SSE atau WebSocket. Cara ini dapat menampilkan pesan bootloader, panic, dan kegagalan Wi-Fi sebelum jaringan hidup.
+
+Dashboard harus meminta pengguna memilih port yang akan dibuka. Hanya satu reader boleh memiliki port tersebut. Bridge membutuhkan batas memori, disconnect yang bersih, dan peringatan yang terlihat ketika proses flash tidak dapat dimulai karena monitor masih memegang koneksi serial.
+
+\subsection{Jalan kedua: log dikirim melalui Wi-Fi}
+
+Runtime dapat mengumpulkan catatan log terstruktur, mengirim batch kecil ke Axum, lalu membiarkan browser berlangganan stream milik perangkat. Cara ini bekerja setelah kabel USB dilepas. Kegagalan yang menghentikan Wi-Fi sebelum tersambung tetap tidak dapat dilaporkan melalui jalur ini.
+
+Dashboard yang baik memberi label Serial atau Network pada setiap baris. Server juga membutuhkan batas penyimpanan agar loop yang terlalu berisik tidak memenuhi SQLite atau memori.
+
+\begin{mentorbox}[Yang tersedia hari ini]
+Kedua jalur log perangkat tersebut belum diterapkan pada API saat ini. Terminal gelap yang sudah ada hanya berisi build log dari PC. Kalimat ini perlu tetap terlihat agar terminal contoh tidak dikira sebagai bukti dari hardware.
+\end{mentorbox}
+
+\section{Pindahkan build yang tidak dipercaya ke ruang lebih aman}
+
+Saat ini \codepath{LocalFirmwareBuilder} menjalankan Cargo pada host PC. Cara tersebut cocok untuk proyek lokal yang dipercaya. Cargo dapat menjalankan build script dan procedural macro, sehingga ZIP dari sumber asing membutuhkan batas yang lebih kuat.
+
+Trait \codepath{FirmwareBuilder} menyediakan pintu bagi \codepath{DockerFirmwareBuilder}. Container yang dirancang dengan teliti memakai image toolchain yang versinya dikunci, source mount read-only, folder output kecil yang dapat ditulis, serta batas waktu, CPU, memori, process, dan log. Container tidak membawa rahasia milik host.
+
+Coordinator tetap dapat menerima baris log dan artifact akhir dalam bentuk yang sama. Route serta polling frontend tidak perlu mengetahui bahwa ruang build telah diganti.
+
+\section{Berikan tanda tangan sungguhan kepada firmware}
+
+Pertahankan SHA-256 untuk integritas transfer. Tambahkan bukti penerbit sebagai lapisan terpisah dengan alat signing yang didukung dan trust anchor pada perangkat.
+
+Sistem build menandatangani image atau digest yang disetujui memakai private key yang dilindungi. Metadata firmware membawa signature, algoritma, dan key ID. Perangkat memverifikasi semuanya sebelum mengaktifkan slot. Rotasi kunci dan pemulihan membutuhkan rencana yang sudah diuji.
+
+Ikuti panduan ESP-IDF Secure Boot dan signing saat proyek bergerak menuju produksi. Rumus shared-secret buatan sendiri terlalu rapuh untuk tugas ini.
+
+\section{Biarkan API tumbuh tanpa mengejutkan proyek lama}
+
+Managed upload sudah menyatakan \codepath{application_api_version = 2}. Ketika kontrak aplikasi berubah, tambahkan atau migrasikan versi dengan sengaja. Berikan pesan penolakan yang jelas kepada ZIP lama beserta contoh konversi pendek.
+
+Utamakan penambahan field yang dapat diabaikan kode lama. Kunci versi runtime dan application API bersama-sama di generated workspace. Jika payload HTTP publik membutuhkan perubahan yang memutus kompatibilitas, berikan batas versi yang mudah terlihat.
+
+\section{Uji dari lapisan murah menuju board}
+
+Mulailah dengan unit test untuk path, versi, pembacaan manifest, dan perubahan status. Tambahkan integration test memakai basis data SQLite sementara dan fake builder. Periksa navigasi frontend serta keadaan gagal di browser. Sesudah itu, jalankan proyek yang sudah diketahui baik melalui toolchain ESP asli.
+
+Tes fisik diletakkan terakhir karena memakan waktu paling banyak dan mengungkap jenis masalah yang berbeda. Uji update berhasil, jaringan terlepas, download terputus, hash salah, listrik padam, setup gagal, rollback, dan pertukaran slot berulang.
+
+Tuliskan lapisan mana yang lolos. ``Tes Rust berhasil'' dan ``rollback bekerja pada board ini'' adalah dua bukti berbeda.
+
+\begin{checkpoint}
+Pilih satu pengembangan dari bab ini. Isi kalimat kepemilikan di bagian awal. Di bawahnya, gambar berkas yang akan disentuh, kegagalan baru yang mungkin dilihat pemula, dan tes terkecil yang membuktikan perubahan tanpa hardware. Tambahkan tes fisik pada baris terakhir.
+\end{checkpoint}

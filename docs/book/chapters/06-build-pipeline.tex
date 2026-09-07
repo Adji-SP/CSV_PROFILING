@@ -1,0 +1,131 @@
+\chapter{What Really Happens to the ZIP}
+
+\section{Begin at the upload form}
+
+On the OTA Firmware page, the form asks for three things: a ZIP, a board, and a version. The browser packs them into a multipart request with these field names:
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{l l Y}
+\toprule
+Field & Example & Why the server needs it\\
+\midrule
+\codepath{project} & \codepath{sensor.zip} & The Rust source and Cargo files\\
+\codepath{target} & \codepath{esp32s3} & The compiler and chip choice\\
+\codepath{version} & \codepath{1.0.1} & The release name reported by the new firmware\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Axum gives the upload a random project ID. That ID names its private extraction folder. A filename supplied by the browser never gets to choose where the server writes.
+
+\section{The server checks the suitcase before unpacking it}
+
+A ZIP is much like a suitcase with a list of intended destinations. A dishonest entry might claim that its file belongs in \codepath{../../somewhere-else}. Extracting that name without checking would let the archive escape its room. This attack is often called ZIP slip.
+
+The extractor refuses parent paths, absolute paths, symbolic links, more than 10,000 entries, and more extracted data than the configured limit. It also insists on finding a \codepath{Cargo.toml}.
+
+These checks may feel strict when your own archive is rejected. They protect every other folder on the PC. Fix the ZIP layout rather than relaxing the guard.
+
+\section{The project chooses one of two paths}
+
+After extraction, \codepath{services/project.rs} looks for \codepath{ota-app.toml}.
+
+If the file exists, the project is a \emph{managed application}. It supplies the product behavior while the stable runtime supplies Wi-Fi, OTA, and rollback.
+
+\begin{lstlisting}[language=TOML,numbers=none]
+schema_version = 1
+application_api_version = 2
+entrypoint = "src/main.rs"
+\end{lstlisting}
+
+If the file is absent, the project is \emph{standalone firmware}. Axum builds the project as it arrived. That project must carry its own OTA client if it should update itself again.
+
+For a first application, managed mode is easier. You can write sensor behavior without copying the network and partition code into every upload.
+
+\section{How two files named main.rs live together}
+
+This point deserves a slow pass.
+
+The stable runtime has a normal executable \codepath{fn main()} in \codepath{examples/esp32-rust-ota-client/src/main.rs}. It owns boot, Wi-Fi, OTA, and application startup.
+
+Your ZIP also keeps \codepath{src/main.rs}, shaped like an ordinary firmware program. It exports two free functions:
+
+\begin{lstlisting}[language=Rust]
+pub fn setup(context: &mut AppContext) -> anyhow::Result<State>;
+pub fn main(context: AppContext, state: State) -> anyhow::Result<()>;
+\end{lstlisting}
+
+Axum copies the stable runtime into a private generated workspace. It places your application under \codepath{applications/device-app} and adjusts only the copied Cargo manifests. In that copy, Cargo treats your \codepath{src/main.rs} as a library source file. The runtime can then call \codepath{device_app::setup} and \codepath{device_app::main}.
+
+Your uploaded files stay unchanged. Rust links both pieces into one complete image.
+
+\begin{mentorbox}[A kitchen picture]
+The stable runtime is a kitchen with power, water, and safety rules. Your upload is the recipe being cooked today. The finished meal includes both. Uploading a new recipe does not pile a second kitchen on top of the first one.
+\end{mentorbox}
+
+\section{The builder checks its tools}
+
+The actual command runner lives in \codepath{services/builder.rs}. Before it touches the project, it asks three programs for their versions:
+
+\begin{lstlisting}
+cargo --version
+rustc --version
+espflash --version
+\end{lstlisting}
+
+A missing tool becomes a failed build record with a clear message. Axum stays alive, so you can fix the environment and try another build.
+
+The builder is hidden behind a small Rust trait named \codepath{FirmwareBuilder}. Today the implementation runs tools directly on the PC. Tomorrow another implementation could run them inside a locked-down container while the routes remain the same.
+
+\section{Cargo turns source into an ELF}
+
+The build command is:
+
+\begin{lstlisting}
+cargo build --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+Axum does not build a shell sentence from uploaded text. It starts \codepath{cargo} and passes each argument separately. The working directory is the trusted project workspace.
+
+While Cargo works, the server reads both output streams line by line and saves them in the build record. This is why the dashboard can show the real compiler message and why an old failed build still has useful logs after a browser refresh.
+
+\section{espflash prepares the OTA image}
+
+Cargo's ELF is useful to development tools, but the inactive OTA partition needs an ESP-IDF application image. The next command follows this shape:
+
+\begin{lstlisting}
+espflash save-image --chip esp32s3 --format esp-idf \
+  <ELF_FILE> firmware-sensor-v1.0.1-a8c4f2.bin
+\end{lstlisting}
+
+The builder deliberately asks for an application image. It does not make a merged factory image containing bootloader and partition data. Those larger pieces belong to initial USB provisioning.
+
+\section{The fingerprint closes the package}
+
+The server reads the finished \codepath{.bin} and calculates SHA-256. Think of the hash as a long fingerprint. The device calculates the same fingerprint while it downloads. If the two strings differ, the bytes changed or the wrong file arrived, so the device refuses to activate it.
+
+On success, SQLite receives the filename, byte size, target, version, project ID, build ID, timestamp, and hash. The dashboard then adds the image to the firmware table.
+
+\begin{mentorbox}[A fingerprint is not a signature]
+SHA-256 catches corruption. It does not tell the device who approved the firmware. Production publisher identity needs real signing and protected keys. The project leaves that as a visible future boundary.
+\end{mentorbox}
+
+\section{Read the build states as a little story}
+
+\begin{center}
+\ttfamily uploaded $\rightarrow$ queued $\rightarrow$ building $\rightarrow$ success\par
+\hspace*{7.4cm}$\searrow$ failed
+\end{center}
+
+Uploaded means the suitcase passed inspection. Queued means a build record exists. Building means the tools are working. Success means the binary and metadata are real. Failed means the log holds the reason the journey stopped.
+
+Only one queued or active build is allowed for the same project. A second click receives a conflict instead of launching two compilers into the same working folders.
+
+\begin{warningbox}[Your own ZIP can still run code on the PC]
+Cargo may execute \codepath{build.rs}, procedural macros, and dependency build scripts. Safe extraction protects paths, not the act of compilation. Use trusted projects until the builder runs inside a proper sandbox.
+\end{warningbox}
+
+\begin{checkpoint}
+Open \codepath{examples/uploaded-firmware-basic}. Check that its ZIP root would contain \codepath{Cargo.toml}, \codepath{ota-app.toml}, and \codepath{src/main.rs}. Upload it as version \codepath{1.0.1} and watch the log. A successful toolchain should produce a real binary. A missing tool should produce a real failure. Both outcomes tell the truth.
+\end{checkpoint}
+

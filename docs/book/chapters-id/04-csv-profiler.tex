@@ -1,0 +1,129 @@
+\chapter{Mengikuti Satu Berkas CSV}
+
+\section{Buat berkas kecil yang dapat dipahami dengan mata}
+
+Buat \codepath{sensor-readings.csv} dengan empat baris berikut:
+
+\begin{lstlisting}[numbers=none]
+device,temperature,room
+alpha,24.7,lab
+beta,,office
+alpha,24.7,lab
+gamma,31.2,workshop
+\end{lstlisting}
+
+Kita sudah mengetahui rahasianya. Satu nilai suhu kosong. Baris alpha muncul dua kali. Ruang workshop lebih hangat daripada ruangan lain. Berkas mungil membuat kita mudah memeriksa apakah laporan berkata jujur.
+
+Buka CSV Profiler, pilih berkas tersebut, lalu tekan Run Profiling. Biarkan \codepath{python/profiler_server.py} terbuka sementara layar progress bergerak.
+
+\section{Route upload menerima amplopnya}
+
+Cari \codepath{@app.route("/upload")} di berkas Python. Flask memanggil fungsi di bawah baris itu ketika browser mengirim sebuah berkas.
+
+Baca pemeriksaan awal sebagai pertanyaan biasa:
+
+\begin{lstlisting}[language=Python]
+if "file" not in request.files:
+    return jsonify({"error": "No file provided"}), 400
+
+if not f.filename.lower().endswith(".csv"):
+    return jsonify({"error": "Only CSV files are supported"}), 400
+\end{lstlisting}
+
+Jika amplop berisi CSV, Flask memberikan ID acak kepada pekerjaan tersebut lalu menyimpan salinan kerja. Nama berkas asli masuk ke catatan sesi. Nama berkas yang tersimpan memakai ID acak, sehingga dua orang dapat mengunggah \codepath{data.csv} tanpa berebut path yang sama.
+
+Setelah itu, route menjalankan \codepath{run_profiling} pada background thread dan mengirim ID pekerjaan kepada browser.
+
+\begin{mentorbox}[Mengapa menjawab sebelum laporan selesai?]
+Profil lengkap dapat memakan waktu. Jika satu permintaan browser menunggu seluruh pekerjaan tanpa kabar, halaman terasa membeku. ID pekerjaan memberi browser sesuatu yang dapat diikuti sementara Python meneruskan pekerjaannya.
+\end{mentorbox}
+
+\section{Progress datang seperti catatan di bawah pintu}
+
+Setiap pekerjaan aktif memiliki antrean Python kecil. Profiler meletakkan pesan kemajuan ke dalamnya. Route \codepath{/progress/<job-id>} menunggu pesan tersebut lalu mengirimkannya kepada browser saat pesan tiba.
+
+Aliran satu arah ini disebut server-sent events, biasa disingkat SSE. Gambarnya lebih berguna daripada namanya: Python menulis catatan pendek, lalu browser membacanya tanpa perlu mengulang pertanyaan yang sama terus-menerus.
+
+\begin{lstlisting}[language=Python]
+def generate():
+    while True:
+        message = q.get()
+        if message is None:
+            break
+        yield message
+\end{lstlisting}
+
+Ketika antrean menerima \codepath{None}, aliran ditutup. Browser kemudian membuka laporan yang sudah selesai.
+
+\section{Tempat laporan beristirahat}
+
+Flask menyimpan HTML laporan di \codepath{python/reports}. Di sebelahnya terdapat sebuah JSON sidecar. Anggap sidecar sebagai label pada map arsip: nama berkas asli, job ID, waktu pembuatan, alamat laporan, jumlah baris, dan jumlah kolom.
+
+Previous Runs membaca label tersebut melalui \codepath{GET /sessions}. Refresh browser tidak menghapus sesi karena rincian penting berada di disk, tidak hanya di memori JavaScript.
+
+Route berikut membentuk rak sesi kecil:
+
+\begin{longtable}{p{0.15\textwidth}p{0.34\textwidth}p{0.41\textwidth}}
+\toprule
+Metode & Route & Hasil yang diterima\\
+\midrule
+\endhead
+GET & \codepath{/sessions} & Semua sesi laporan yang masih ditemukan Flask.\\
+GET & \codepath{/session/<job-id>} & Catatan untuk satu sesi tersimpan.\\
+GET & \codepath{/report/<job-id>} & Laporan HTML yang dihasilkan.\\
+DELETE & \codepath{/reset/<job-id>} & Penghapusan satu sesi beserta berkas kerjanya.\\
+DELETE & \codepath{/reset-all} & Penghapusan seluruh sesi CSV lokal.\\
+\bottomrule
+\end{longtable}
+
+\section{Bersihkan salinan, lalu lihat lagi}
+
+Kembali ke berkas empat baris tadi. Pada panel cleaning, pilih penghapusan duplikat dan pengisian suhu kosong dengan median. Ketika pilihan diterapkan, browser mengirim deskripsi JSON kepada \codepath{/clean/<job-id>}.
+
+Bentuk idenya seperti ini:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "drop_duplicates": true,
+  "missing": {
+    "temperature": "fill_median"
+  }
+}
+\end{lstlisting}
+
+Pandas membuka data kerja saat ini, menerapkan pilihan tersebut, lalu menulis \codepath{<job-id>_cleaned.csv}. Upload asli tetap tersedia. Flask memperbarui catatan laporan dan memberikan alamat download kepada browser.
+
+Buka CSV hasil pembersihan. Seharusnya ada tiga baris data dan tidak ada suhu kosong. Karena \codepath{24.7} muncul dua kali pada nilai awal, hasil pengisian median juga semestinya \codepath{24.7}.
+
+\section{Gunakan playground sebagai kertas coretan}
+
+Playground menjalankan satu gagasan Pandas kecil pada satu waktu. Mulailah dengan Preview, Head, Tail, Describe, atau Value Counts. Pilihan tersebut tidak mengubah data yang tersimpan.
+
+Sebagai contoh, permintaan berikut meminta sepuluh baris dengan suhu terbesar:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "operation": "sort_values",
+  "column": "temperature",
+  "limit": 10,
+  "mutate": false
+}
+\end{lstlisting}
+
+Kata \codepath{mutate} berarti ``ubah data kerja.'' Dashboard hanya mengirim \codepath{true} setelah Anda menekan tindakan perubahan secara tegas untuk operasi seperti rename, fill, drop, konversi tipe, atau penggantian isi sel.
+
+Route membatasi jumlah baris antara 1 dan 500. Batas kecil ini mencegah preview raksasa memenuhi halaman karena salah ketik.
+
+\section{Menambah fitur CSV tanpa mengganggu OTA}
+
+Letakkan operasi data baru di route Flask atau helper Python. Tambahkan kontrol yang sesuai ke \codepath{index.html} dan perilakunya ke \codepath{app.js}. Pertahankan permintaannya pada \codepath{API_BASE}.
+
+Dengan aturan yang sama, fitur OTA tinggal di Axum dan \codepath{ota.js}. Kedua meja kerja berbagi meja penerima tamu, tetapi masing-masing memakai alatnya sendiri.
+
+\begin{warningbox}
+Jangan mengganti nama route CSV yang sudah ada ketika menambah fitur firmware. Perilaku frontend yang tersimpan sudah bergantung pada alamat tersebut. Tambahan kecil di sekitar alur yang bekerja lebih aman daripada penulisan ulang.
+\end{warningbox}
+
+\begin{checkpoint}
+Profilkan berkas empat baris, hapus duplikatnya, isi suhu kosong, lalu download hasilnya. Refresh browser dan pulihkan sesi dari Previous Runs. Setelah itu, jelaskan mengapa laporan tetap ada walaupun memori JavaScript sudah dimuat ulang.
+\end{checkpoint}

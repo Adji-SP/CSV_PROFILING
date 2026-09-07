@@ -1,0 +1,106 @@
+\documentclass[11pt,letterpaper,openany]{book}
+\usepackage{beautybook-inspired}
+
+\newcommand{\BookTitle}{Building a CSV Profiling and ESP32 OTA Dashboard}
+\newcommand{\BookSubtitle}{A friendly, hands-on guide from first click to first update}
+\newcommand{\BookAuthor}{Adji-SP}
+\hypersetup{
+  pdftitle={Building a CSV Profiling and ESP32 OTA Dashboard},
+  pdfauthor={Adji-SP},
+  pdfsubject={Beginner guide to the CSV Profiling dashboard and ESP32-S3 OTA system}
+}
+
+\begin{document}
+\frontmatter
+
+\bookcover{\BookAuthor}{Building a CSV Profiling\\and ESP32 OTA Dashboard}{\BookSubtitle}{First Edition}{CSV\_PROFILING}
+
+\cleardoublepage
+\thispagestyle{empty}
+\vspace*{0.58\textheight}
+{\small
+\textbf{\BookTitle}\par
+First edition, September 2026.\par
+
+This handbook documents the local project as implemented in this repository. The supplied \emph{beautybook} PDF inspired its visual system. Its text and examples were written specifically for CSV\_PROFILING.\par
+
+Commands that affect hardware are marked clearly. Review the ESP32-S3 flash size, serial port, partition table, and local network settings before using them.\par
+}
+\clearpage
+
+\frontbanner{Preface}
+Open the project folder and it can feel as though three different subjects have landed on the same desk: data analysis, web development, and embedded Rust. That feeling is normal. We will pick up one piece at a time.
+
+The dashboard has two working rooms behind it. Flask and Pandas look after CSV files. Axum looks after firmware builds and devices. Farther down the line, an ESP32-S3 calls home over Wi-Fi and asks whether a new application is waiting. Once you can picture those rooms, the source tree stops looking like a wall of unfamiliar names.
+
+This book is meant to be used with the project open beside it. Read a few pages, touch the file being discussed, and try the small checkpoint at the end of the chapter. Keep the terminals where you can see them. A failed command often tells you exactly which door is still locked.
+
+\begin{flushright}
+\textit{The CSV\_PROFILING project}\par
+2026
+\end{flushright}
+\clearpage
+
+\frontbanner{How to Use This Book}
+Treat these pages like a marked-up workshop notebook. You do not need to memorize the code. Keep the repository open, follow the paths printed in monospace, and compare the short examples with the real files. Windows commands use PowerShell. Linux and macOS commands use a POSIX shell.
+
+You will meet three kinds of notes in the margins of the lesson:
+
+\begin{mentorbox}
+A tutor's note slows down for the question someone would usually ask across the table.
+\end{mentorbox}
+
+\begin{warningbox}
+A pause note appears before a command can touch hardware, delete data, or loosen a safety boundary.
+\end{warningbox}
+
+\begin{checkpoint}
+A small exercise lets your own screen confirm what the page just explained.
+\end{checkpoint}
+
+You can begin without an ESP32 on the desk. The dashboard, APIs, database, ZIP checks, and error messages all run on the computer. When the lesson reaches a physical flash, the page will say so plainly.
+\clearpage
+
+\tableofcontents
+
+\mainmatter
+
+\part{Foundations}
+\partintro{We begin with the view from the doorway. You will see the whole project in plain language, then start it without rushing past the small signs that tell us it is healthy.}
+\include{chapters/01-system-tour}
+\include{chapters/02-first-start}
+
+\part{The Dashboard and CSV Profiler}
+\partintro{A single CSV file will be our guide. We will follow it from the upload button into Python, watch the report come back, and peek behind each dashboard screen as we go.}
+\include{chapters/03-frontend}
+\include{chapters/04-csv-profiler}
+
+\part{The Rust OTA Service}
+\partintro{Now we cross into the Rust server. We will unpack one firmware ZIP carefully and follow it until a real application image and its build history appear.}
+\include{chapters/05-ota-server}
+\include{chapters/06-build-pipeline}
+
+\part{Firmware on the ESP32-S3}
+\partintro{The ESP32 finally joins us. First it receives a dependable foundation over USB. After that, your smaller application code can ride inside each complete OTA release.}
+\include{chapters/07-embedded-runtime}
+\include{chapters/08-writing-firmware}
+\include{chapters/09-device-protocol}
+
+\part{Practice and Extension}
+\partintro{The last part is a workbench. You will run the whole path, learn how to read common failures, and sketch improvements without pulling apart the pieces that already work.}
+\include{chapters/10-lab}
+\include{chapters/11-troubleshooting}
+\include{chapters/12-extending}
+
+\appendix
+\include{chapters/a-api-reference}
+\include{chapters/b-reference}
+
+\backmatter
+\chapter*{Closing Note}
+\addcontentsline{toc}{chapter}{Closing Note}
+You now have a map from browser click to Pandas report, and from uploaded Rust source to an application image written into an inactive ESP32 OTA slot. That map matters more than memorizing a command. When something fails, locate the boundary first: browser to Flask, browser to Axum, builder to toolchain, PC to LAN, or bootloader to application. The logs on that boundary usually tell you what to fix next.
+
+Keep the initial runtime recoverable over USB, test rollback on real hardware, and treat uploaded build inputs as trusted code until the builder runs inside a sandbox. With those habits, this project can grow without losing the clean separation that makes it understandable.
+
+\end{document}

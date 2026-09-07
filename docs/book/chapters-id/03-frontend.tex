@@ -1,0 +1,113 @@
+\chapter{Berjalan Menyusuri Dashboard}
+
+\section{Mulai dari apa yang terlihat oleh mata}
+
+Biarkan dashboard terbuka di sebelah folder proyek. Jalur gelap di kiri adalah sidebar. Bilah tipis di atas menunjukkan halaman yang sedang aktif. Area terang yang luas menjadi tempat tugas saat ini muncul.
+
+Klik CSV Profiler, Previous Runs, OTA Firmware, Devices, dan Build History. Browser tidak memuat lima berkas HTML terpisah. Semua bagian sudah ada di halaman yang sama, lalu JavaScript menampilkan satu bagian pada satu waktu.
+
+Sekarang buka \codepath{web/index.html}. Cari \codepath{ota-section}. Di sana terdapat layar OTA Firmware. Sedikit lebih bawah ada \codepath{devices-section} dan \codepath{builds-section}. HTML adalah denah lantai dashboard.
+
+\begin{mentorbox}[Kebiasaan kecil yang sangat membantu]
+Saat sebuah tombol bertingkah aneh, cari \codepath{id}-nya di HTML terlebih dahulu. Setelah itu, cari ID yang sama di JavaScript. Cara ini biasanya lebih cepat daripada membaca seluruh script dari baris pertama.
+\end{mentorbox}
+
+\section{Kenali berkas frontend satu per satu}
+
+Hanya empat berkas yang perlu diperhatikan:
+
+\begin{description}
+  \item[\codepath{web/index.html}] Benda yang ada di halaman: tautan, judul, formulir, tabel, dialog, dan keadaan kosong.
+  \item[\codepath{web/style.css}] Penampilannya: jarak, warna, border, kartu, tombol, badge, progress bar, dan terminal build yang gelap.
+  \item[\codepath{web/app.js}] Perilaku halaman CSV.
+  \item[\codepath{web/ota.js}] Perilaku OTA Firmware, Devices, dan Build History.
+\end{description}
+
+HTML memuat kedua script di dekat tag penutupnya:
+
+\begin{lstlisting}[language=HTML,numbers=none]
+<script src="app.js"></script>
+<script src="ota.js"></script>
+\end{lstlisting}
+
+Urutan itu membiarkan script CSV lama tetap pada tempatnya. Perilaku OTA hadir di sebelahnya melalui berkas terpisah.
+
+\section{Sebuah tombol menjalankan rantai peristiwa pendek}
+
+Lihat tombol Upload \& Build di \codepath{index.html}. ID-nya adalah \codepath{ota-build-btn}. Cari tulisan itu di \codepath{ota.js}. Anda akan menemukan event handler yang membaca berkas, target, dan versi yang dipilih.
+
+Rantainya seperti ini:
+
+\begin{center}
+\ttfamily klik $\rightarrow$ baca formulir $\rightarrow$ panggil Axum $\rightarrow$ perbarui halaman
+\end{center}
+
+Pola yang sama muncul di seluruh dashboard. Tautan navigasi mengganti bagian yang terlihat. Tombol refresh memanggil endpoint daftar, lalu menyusun ulang tabel. Tombol deploy membuka dialog, kemudian mengirim ID firmware yang dipilih.
+
+Anda tidak perlu memahami semua baris untuk mengikuti alurnya. Temukan benda HTML, temukan listener-nya, lalu ikuti fungsi yang dipanggil.
+
+\section{Mengapa ada dua alamat API}
+
+Di bagian atas script terdapat:
+
+\begin{lstlisting}[language=JavaScript]
+const API_BASE = "http://localhost:5000";
+const OTA_API_BASE = "http://localhost:7000";
+\end{lstlisting}
+
+Dua baris kecil ini adalah papan arah. Permintaan CSV berjalan menuju Flask. Permintaan firmware dan perangkat berjalan menuju Axum. Jangan menyatukan kedua konstanta hanya karena layanannya hidup di PC yang sama.
+
+Script OTA membungkus pekerjaan permintaan yang berulang di dalam \codepath{otaRequest}. Dengan bahasa sehari-hari, helper itu berkata: kirim permintaan, periksa apakah berhasil, baca pesan server yang berguna jika gagal, lalu uraikan JSON ketika respons mempunyai isi.
+
+\begin{lstlisting}[language=JavaScript]
+async function getDevices() {
+  return otaRequest("/api/ota/devices");
+}
+
+async function deployFirmware(deviceId, firmwareId) {
+  return otaRequest(`/api/ota/devices/${deviceId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ firmware_id: firmwareId })
+  });
+}
+\end{lstlisting}
+
+Fungsi pertama mengajukan pertanyaan. Fungsi kedua membawa perintah. Keduanya melewati pengantar pesan yang sama.
+
+\section{Perhatikan suasana halaman build OTA berubah}
+
+Pilih ZIP, lalu tekan Upload \& Build. Bahkan sebelum compiler mulai, halaman bergerak melewati beberapa keadaan kecil:
+
+\begin{description}
+  \item[Idle] Belum ada pekerjaan yang dikirim.
+  \item[Uploading] Browser sedang mengirim arsip.
+  \item[Queued] Axum sudah membuat catatan build.
+  \item[Building] Alat-alat di PC sedang bekerja.
+  \item[Success] Binary sungguhan beserta sidik jarinya sudah tersimpan.
+  \item[Failed] Sesuatu menghentikan build, dan log menunjukkan tempatnya.
+\end{description}
+
+Frontend meminta catatan build setiap beberapa detik. Cara ini disebut polling. Bayangkan seseorang mengintip melalui jendela bengkel dari waktu ke waktu, alih-alih menahan sambungan telepon selama build berlangsung.
+
+Kesalahan compiler tetap terlihat di panel terminal. Toast mungkin hanya berkata build gagal, sedangkan area log gelap menyimpan rincian yang dapat dipakai. Gulir ke atas dan cari kesalahan jelas yang pertama.
+
+\section{Memahami kartu perangkat}
+
+Halaman Devices menampilkan apa yang diingat Axum. Halaman itu tidak memindai ruangan untuk mencari board Wi-Fi. ESP32 sungguhan menambahkan dirinya sendiri melalui registrasi dan heartbeat.
+
+Setiap kartu memperlihatkan versi terakhir yang dilaporkan, versi tujuan, alamat jaringan, waktu terakhir terlihat, dan kemajuan OTA. Jika listrik board mati, kartu lamanya mungkin masih ada. Lihat timestamp untuk menilai seberapa segar informasinya.
+
+\section{Buat satu perubahan visual yang aman}
+
+Buka \codepath{web/index.html}, lalu cari subtitle di bawah OTA Firmware. Ubah beberapa kata, simpan berkas, kemudian refresh dashboard. Jika tulisan lama masih ada, lakukan hard refresh agar browser berhenti memakai salinan cache.
+
+Setelah melihat hasilnya, kembalikan kalimat latihan tadi. Anda baru saja mengikuti loop frontend paling sederhana: ubah HTML, biarkan Flask menyajikannya, lalu biarkan browser menggambarnya.
+
+\begin{mentorbox}[Tentang kata terminal]
+Terminal gelap di halaman OTA menampilkan keluaran build dari PC. Saat ini panel itu belum menampilkan pesan yang dicetak ESP32. Gunakan \codepath{espflash monitor} untuk melihat keluaran board. Bab 12 menjelaskan dua cara yang masuk akal untuk membawa log tersebut ke dashboard di masa depan.
+\end{mentorbox}
+
+\begin{checkpoint}
+Pilih tautan navigasi Devices. Cari ID-nya di \codepath{index.html}, click listener di JavaScript, fungsi yang memuat perangkat, dan route Axum yang dipanggil. Tulis empat nama itu di kertas sebagai jejak kecil.
+\end{checkpoint}

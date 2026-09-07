@@ -1,0 +1,7 @@
+[package]
+name = "firmware-app-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+esp-idf-svc = "0.52.1"

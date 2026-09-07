@@ -1,0 +1,117 @@
+\chapter{Put Everything Together}
+
+\section{Clear a little space on the desk}
+
+This is the day we run the whole path. Keep the PC, ESP32-S3, data USB cable, and Wi-Fi details nearby. Open one terminal for Flask and one for Axum. Leave room for a third terminal when the serial monitor appears.
+
+There is no prize for rushing. At the end of each stage, look for the small piece of evidence named on the page. If it is missing, stay with that stage.
+
+\section{Stage one: wake both PC services}
+
+Open \codepath{.env} and check the PC's LAN address, Wi-Fi name, Wi-Fi password, and device name. Then start the project:
+
+\begin{lstlisting}[numbers=none]
+# Windows
+.\run-dev.bat
+
+# Linux or macOS
+./run-dev.sh
+\end{lstlisting}
+
+Open these two addresses:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:5000
+http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+\textbf{What to notice:} the first tab shows the dashboard; the second says the OTA service is online and prints the correct LAN-facing public URL.
+
+\section{Stage two: give the old CSV path a quick health check}
+
+Upload the small \codepath{sensor-readings.csv} from Chapter 4. Watch progress, open the report, and run a playground preview. Visit Previous Runs and make sure the session is listed.
+
+\textbf{What to notice:} switching to OTA Firmware and back does not lose the CSV session. This proves our newer pages still respect the original Flask work.
+
+\section{Stage three: pack the basic application}
+
+On Windows PowerShell:
+
+\begin{lstlisting}
+Compress-Archive \
+  -Path examples\uploaded-firmware-basic\* \
+  -DestinationPath uploaded-firmware-basic.zip
+\end{lstlisting}
+
+Open the ZIP. Its first level should show \codepath{Cargo.toml}, \codepath{ota-app.toml}, and \codepath{src}.
+
+Go to OTA Firmware. Choose the ZIP, select ESP32-S3, type version \codepath{1.0.1}, and press Upload \& Build.
+
+\textbf{What to notice:} the badge moves from uploading to queued and building. The terminal begins with tool versions and the managed-application mode. Real compiler lines follow.
+
+If the build fails, keep the record. Find the first useful error and fix that condition. Success should never be invented by editing SQLite or dropping a random binary into \codepath{firmware-builds}.
+
+\section{Stage four: inspect what a successful build made}
+
+When the badge reaches success, look at the firmware table. The new row should have version \codepath{1.0.1}, target ESP32-S3, a filename, byte size, SHA-256, time, and Ready status.
+
+Behind the screen, you will find:
+
+\begin{itemize}
+  \item the extracted upload under \codepath{firmware-projects};
+  \item a generated managed workspace inside that project;
+  \item the application binary under \codepath{firmware-builds};
+  \item matching project, build, and firmware rows in \codepath{data/ota.db}.
+\end{itemize}
+
+Press Download once. The downloaded byte count should match the row in the table.
+
+\section{Stage five: give the board its first base program}
+
+This is the physical boundary. Review \codepath{examples/esp32-rust-ota-client/partitions.csv} and compare it with the board's flash size. Connect the board with a data cable.
+
+Set the runtime values and flash:
+
+\begin{lstlisting}
+cd examples\esp32-rust-ota-client
+$env:WIFI_SSID="your-ssid"
+$env:WIFI_PASS="your-password"
+$env:OTA_SERVER_URL="http://192.168.1.5:7000"
+$env:DEVICE_NAME="Tutorial sensor"
+cargo +esp run --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+Replace the sample IP before pressing Enter.
+
+\begin{warningbox}
+The command writes to the connected board. Confirm the chip, serial port, flash size, partition table, and stable power first. Do not reuse an example partition map on an existing product until its data partitions have been reconciled.
+\end{warningbox}
+
+\textbf{What to notice:} the serial terminal shows startup and Wi-Fi connection. Soon afterward, the board appears on the Devices page with its current version and IP address.
+
+\section{Stage six: leave the update note}
+
+Open Devices and press Deploy OTA for the new board. Choose the firmware row for \codepath{1.0.1}.
+
+The card should first say Pending. The runtime checks every thirty seconds, so give it a moment. Then watch Downloading, Verifying, Installing, and Rebooting.
+
+The serial monitor may disappear briefly during restart. Open it again if needed. The new image runs application setup, marks its slot valid, and starts the uploaded main loop.
+
+\textbf{What to notice:} the device card reaches Success and its current version becomes \codepath{1.0.1}. The serial output contains the basic application's cycle message.
+
+\section{Stage seven: change something you can recognize}
+
+Copy the basic application. Change its log line to a message you will recognize immediately, such as the room or sensor name. Build it as \codepath{1.0.2}, then deploy it.
+
+After reboot, look for the new message in the serial monitor. This is the satisfying moment: source from your ZIP is now running inside the complete firmware image built by the PC.
+
+If you want to try dependencies next, use \codepath{examples/uploaded-firmware-with-libs}. It already demonstrates \codepath{heapless}, Serde, and JSON.
+
+\section{Write down the evidence while it is fresh}
+
+A short lab note can save an afternoon later. Record the build ID, firmware ID, version, byte size, hash, device ID, old and new versions, board model, tool versions, and final serial message. Add the real error and solution when a stage needed repair.
+
+\begin{checkpoint}[The whole path]
+You have completed the lab when the CSV report still works, a real toolchain build creates firmware, a physically provisioned device registers, deployment becomes an update manifest, the device streams and verifies the binary, and the rebooted image reports version \codepath{1.0.1} or later.
+\end{checkpoint}
+

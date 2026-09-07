@@ -1,0 +1,125 @@
+\chapter{Program yang Tinggal di Dalam ESP32}
+
+\section{Berikan fondasi yang dapat diandalkan kepada board}
+
+Pegang ESP32-S3 Anda sejenak. Sebelum OTA dapat membantu, board ini membutuhkan program yang tahu cara bergabung ke Wi-Fi, menemukan PC, dan menulis image baru dengan aman. Program pertama itu adalah runtime stabil di \codepath{examples/esp32-rust-ota-client}.
+
+Kata \emph{stabil} tidak berarti runtime tidak boleh berubah selamanya. Artinya, pembaruan produk sehari-hari tidak perlu menulis ulang seluruh saluran dasarnya. Runtime mengurus:
+
+\begin{itemize}
+  \item startup dan log ESP-IDF;
+  \item koneksi Wi-Fi;
+  \item identitas perangkat dan heartbeat;
+  \item pemeriksaan serta download update;
+  \item dua slot aplikasi OTA;
+  \item verifikasi hash, reboot, dan rollback;
+  \item saat aplikasi upload Anda mulai dijalankan.
+\end{itemize}
+
+Aplikasi dapat mencurahkan perhatiannya pada sensor, motor, layar, atau pekerjaan produk lainnya.
+
+\section{Perjalanan pertama melewati USB}
+
+Buka PowerShell di folder runtime. Isi nilai jaringan dan alamat server yang dapat dijangkau:
+
+\begin{lstlisting}
+cd examples\esp32-rust-ota-client
+$env:WIFI_SSID="your-ssid"
+$env:WIFI_PASS="your-password"
+$env:OTA_SERVER_URL="http://192.168.1.5:7000"
+$env:DEVICE_NAME="Sensor node"
+\end{lstlisting}
+
+Periksa IP dengan teliti. Alamat tersebut milik PC yang menjalankan Axum.
+
+Ketika board, kabel, dan tabel partisi sudah siap, perintah berikut membangun firmware, melakukan flash, lalu membuka monitor:
+
+\begin{lstlisting}
+cargo +esp run --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+Cargo runner yang dikonfigurasi akan memanggil \texttt{espflash flash --monitor}. Flash pertama dapat memasang bootloader dan susunan partisi bersama aplikasi.
+
+\begin{warningbox}[Berhenti dan kenali board yang terhubung]
+Flashing menulis ke hardware fisik. Pastikan board tersebut benar-benar ESP32-S3, kabel USB dapat membawa data, ukuran flash cocok dengan rencana partisi, dan port serial yang dipilih memang milik board ini.
+\end{warningbox}
+
+Saat runtime boot, terminal serial akan menampilkan kegiatan Wi-Fi. Setelah memperoleh alamat IP, perangkat mendaftar ke Axum. Refresh halaman Devices pada dashboard dan cari nama yang tadi Anda berikan.
+
+\section{Baca fn main yang sebenarnya seperti sebuah cerita}
+
+Buka \codepath{examples/esp32-rust-ota-client/src/main.rs}. Fungsi utamanya dimulai di sini:
+
+\begin{lstlisting}[language=Rust,numbers=none]
+fn main() -> Result<()> {
+    esp_idf_svc::sys::link_patches();
+    EspLogger::initialize_default();
+    // platform setup continues...
+}
+\end{lstlisting}
+
+Turuni berkas itu perlahan. Runtime mengambil peripheral board, memisahkan modem, menjalankan system event loop dan NVS, lalu membuat \codepath{WifiManager}. Device ID diturunkan dari station MAC kecuali Anda sudah memberikannya sendiri.
+
+Berikutnya, runtime membuat \codepath{AppContext}. Inilah tas yang diserahkan kepada aplikasi. Sebelum aplikasi dipanggil, runtime bertanya kepada ESP-IDF apakah image saat ini masih baru dan menunggu validasi.
+
+Lalu terjadilah serah terima:
+
+\begin{lstlisting}[language=Rust]
+let application_state = device_app::setup(&mut context)?;
+
+if unverified_image {
+    mark_running_image_valid()?;
+}
+
+// Start the OTA supervisor in its own thread.
+device_app::main(context, application_state)
+\end{lstlisting}
+
+Kode asli memiliki penanganan kesalahan yang lebih lengkap. Bentuk yang perlu diingat adalah: siapkan platform, uji setup aplikasi, setujui slot baru, biarkan OTA tetap hidup, lalu masuki main loop aplikasi.
+
+\section{Buka crate yang lebih kecil}
+
+Runtime dibagi agar tiap bagian muat di kepala saat sedang dipelajari:
+
+\begin{description}
+  \item[\codepath{crates/application-api}] Mendefinisikan hal-hal yang boleh diterima aplikasi.
+  \item[\codepath{crates/wifi-manager}] Memiliki modem dan terus mencoba ketika jaringan terputus.
+  \item[\codepath{crates/ota-runtime}] Berbicara dengan Axum dan menulis update ke slot yang tidak aktif.
+  \item[\codepath{applications/default-app}] Menyediakan perilaku kecil untuk flash USB pertama.
+\end{description}
+
+Anda dapat membuka satu crate tanpa membaca semuanya sekaligus. Pemisahan ini sangat membantu ketika masalah Wi-Fi dan masalah sensor kebetulan muncul pada hari yang sama.
+
+\section{AppContext adalah tas serah terima}
+
+Aplikasi menerima bentuk besar berikut:
+
+\begin{lstlisting}[language=Rust]
+pub struct AppContext {
+    pub device: DeviceInfo,
+    pub network: NetworkHandle,
+    pub peripherals: ApplicationPeripherals,
+}
+\end{lstlisting}
+
+\codepath{device} memberi tahu ID, nama ramah, chip, dan versi firmware. \codepath{network} membiarkan aplikasi menanyakan apakah Wi-Fi tersambung dan IP mana yang terakhir dilaporkan. \codepath{peripherals} membawa pin serta controller yang tersedia.
+
+Setiap item hardware dibungkus dalam \codepath{Option}. Ketika fungsi setup mengambil I2C0, option tersebut menjadi kosong. Kode sekarang mempunyai catatan yang terlihat bahwa satu bagian aplikasi telah memiliki controller itu.
+
+Modem memang tidak dimasukkan ke tas. \codepath{wifi-manager} menyimpannya agar heartbeat dan polling OTA terus berjalan selama aplikasi bekerja.
+
+\begin{mentorbox}[Apakah Wi-Fi manager akan menjadi masalah?]
+Wi-Fi manager justru membantu ketika kepemilikan berada di satu tempat. Manager saat ini sudah memiliki modem, event loop, layanan Wi-Fi yang memakai NVS, dan reconnect loop. Setup access point atau captive portal di masa depan dapat tumbuh di sana. Aplikasi upload tetap membaca network handle yang sama.
+\end{mentorbox}
+
+\section{Flash baru tidak menumpuk kode lama}
+
+Bayangkan dua laci berlabel \codepath{ota_0} dan \codepath{ota_1}. Board menjalankan isi satu laci sementara updater menulis image lengkap ke laci lainnya. Setelah verifikasi dan reboot, kedua laci bertukar peran.
+
+Image yang baru ditulis berisi runtime dan aplikasi pilihan sebagai satu kesatuan. Image tersebut mengganti isi slot yang tidak aktif dari awal sampai akhir. Struct, fungsi, dan library lama tidak tetap dimuat di samping program baru.
+
+Laci yang sebelumnya aktif masih disimpan untuk rollback sampai image baru membuktikan dirinya dapat berjalan. Pada rilis berikutnya, ESP-IDF dapat menimpa laci yang lebih tua. PC boleh menyimpan riwayat firmware panjang di SQLite, sementara board tetap hanya mempunyai dua slot aplikasi.
+
+\begin{checkpoint}
+Sebelum menghubungkan hardware, cari \texttt{fn main} milik runtime, panggilan ke \codepath{device_app::setup}, panggilan ke \codepath{device_app::main}, dan tempat modem dipisahkan dari peripheral aplikasi. Ikuti keempatnya dengan jari dalam urutan tersebut.
+\end{checkpoint}

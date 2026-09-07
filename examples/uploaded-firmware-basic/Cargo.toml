@@ -1,0 +1,15 @@
+[package]
+name = "uploaded-firmware-basic"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+
+[lib]
+crate-type = ["rlib"]
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+# The OTA server replaces this registry placeholder with its pinned local API crate.
+firmware-app-api = "0.1"
+log = "0.4"

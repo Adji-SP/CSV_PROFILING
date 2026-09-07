@@ -1,0 +1,24 @@
+[package]
+name = "esp32-rust-ota-client"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+
+[dependencies]
+anyhow = "1"
+device-app = { package = "ota-default-app", path = "applications/default-app" }
+esp-idf-svc = "0.52.1"
+firmware-app-api = { path = "crates/application-api" }
+log = "0.4"
+ota-runtime = { path = "crates/ota-runtime" }
+wifi-manager = { path = "crates/wifi-manager" }
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+
+[package.metadata.esp-idf-sys]
+esp_idf_version = "v5.3.3"

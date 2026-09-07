@@ -1,0 +1,132 @@
+\chapter{Mari Menyalakan Proyeknya}
+
+\section{Mulai dari komputer}
+
+Biarkan ESP32 belum terhubung untuk sementara. Sasaran pertama lebih kecil: buka dashboard dan pastikan kedua layanan di PC menjawab. Sesudah ini berhasil, masalah pada langkah berikutnya mempunyai lebih sedikit tempat untuk bersembunyi.
+
+Sisi CSV membutuhkan Python 3.10 atau yang lebih baru. Sisi OTA membutuhkan Rust. Toolchain embedded dapat menunggu sampai Anda merasa nyaman menyalakan dashboard.
+
+\section{Siapkan Python dengan tenang}
+
+Virtual environment memberi proyek ini kotak paket Python miliknya sendiri. Proyek Python lain di komputer tidak akan tercampur dengannya.
+
+Buka PowerShell di folder repositori, lalu ketik baris pertama:
+
+\begin{lstlisting}
+py -3 -m venv python\.venv
+\end{lstlisting}
+
+Setelah perintah selesai, lihat isi folder \codepath{python}. Seharusnya ada folder baru bernama \codepath{.venv}. Sekarang pasang paket yang tercantum di \codepath{python/requirements.txt}:
+
+\begin{lstlisting}
+python\.venv\Scripts\python -m pip install -r python\requirements.txt
+\end{lstlisting}
+
+Di Linux atau macOS, dua langkah yang sama ditulis seperti ini:
+
+\begin{lstlisting}
+python3 -m venv python/.venv
+python/.venv/bin/pip install -r python/requirements.txt
+\end{lstlisting}
+
+Pemasangan dapat memakan waktu karena library profiling data membawa beberapa paket pendamping. Tunggu sampai prompt perintah kembali. Teks merah di tengah proses kadang hanya peringatan. Bacalah baris paling akhir untuk mengetahui apakah pemasangan berhasil atau berhenti karena kesalahan.
+
+\section{Periksa alat Rust yang sudah tersedia}
+
+Jalankan satu perintah setiap kali:
+
+\begin{lstlisting}
+cargo --version
+rustc --version
+\end{lstlisting}
+
+Jika keduanya mencetak nomor versi, PC sudah dapat mulai membangun server Axum. Firmware memerlukan dua pemeriksaan tambahan nanti:
+
+\begin{lstlisting}
+rustc +esp --version
+espflash --version
+\end{lstlisting}
+
+Anda belum perlu mengejar seluruh alat embedded yang hilang. Dashboard tetap dapat menyala, menyimpan proyek, memeriksa ZIP, dan menampilkan pesan build gagal yang jujur.
+
+\begin{mentorbox}[Detail Windows yang sering mengejutkan]
+Toolchain ESP Rust mungkin sudah terpasang sementara Windows masih belum mempunyai \codepath{link.exe}. Berkas itu berasal dari Visual Studio Build Tools dengan workload Desktop development with C++. Jika log menyebut \codepath{link.exe}, kode Rust belum tentu salah. Compiler sedang meminta alat native yang tidak ditemukan di Windows.
+\end{mentorbox}
+
+\section{Buat berkas .env milik Anda}
+
+Salin \codepath{.env.example}, lalu beri nama salinannya \codepath{.env}. Inilah halaman pengaturan lokal Anda. Berkas tersebut dapat menyimpan kata sandi Wi-Fi, sehingga Git harus mengabaikannya.
+
+Untuk penyalaan pertama, perhatikan baris-baris ini:
+
+\begin{lstlisting}[language=TOML,numbers=none]
+OTA_BIND_ADDRESS=0.0.0.0
+OTA_PORT=7000
+OTA_PUBLIC_BASE_URL=http://192.168.1.5:7000
+
+WIFI_SSID=your-wifi-name
+WIFI_PASS=your-wifi-password
+DEVICE_NAME=ESP32-S3 Managed Device
+\end{lstlisting}
+
+Ganti \codepath{192.168.1.5} dengan alamat LAN PC Anda. Di Windows, jalankan \codepath{ipconfig}, lalu lihat adapter Wi-Fi atau Ethernet yang sedang dipakai. Alamat yang dicari biasanya diawali \codepath{192.168} atau \codepath{10}.
+
+\begin{warningbox}[Mengapa localhost membuat perangkat tersesat]
+Di PC, \codepath{localhost} berarti PC tersebut. Di ESP32, kata yang sama berarti ESP32 itu sendiri. Masukkan alamat LAN PC ke \codepath{OTA_PUBLIC_BASE_URL} dan \codepath{OTA_SERVER_URL} milik runtime.
+\end{warningbox}
+
+Nilai lain di \codepath{.env.example} sudah menunjuk ke folder lokal yang wajar. Biarkan dahulu selama percobaan pertama.
+
+\section{Tekan tombol mulai milik proyek}
+
+Pengguna Windows dapat menjalankan:
+
+\begin{lstlisting}
+.\run-dev.bat
+\end{lstlisting}
+
+Dua jendela terminal akan terbuka. Satu bertuliskan CSV Profiler dan memakai port 5000. Jendela lain mengompilasi lalu menyalakan server OTA Rust pada port 7000. Build Rust pertama mungkin diam cukup lama karena Cargo sedang menyiapkan dependensi.
+
+Pengguna Linux dan macOS dapat menjalankan:
+
+\begin{lstlisting}
+chmod +x run-dev.sh
+./run-dev.sh
+\end{lstlisting}
+
+Ketika kedua pekerja siap, buka \codepath{http://localhost:5000}. Sidebar dan halaman upload CSV seharusnya terlihat.
+
+\section{Ajukan satu pertanyaan kecil kepada tiap layanan}
+
+Dashboard membuktikan bahwa Flask menjawab. Berikan tes kecil yang serupa kepada Axum dengan membuka:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+Browser akan menampilkan JSON. Tidak perlu memahami seluruh field dahulu. Cari \codepath{"status":"online"}, lalu pastikan \codepath{public_base_url} berisi alamat LAN Anda.
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "service": "CSV_PROFILING OTA Server",
+  "status": "online",
+  "public_base_url": "http://192.168.1.5:7000",
+  "supported_targets": ["esp32s3"]
+}
+\end{lstlisting}
+
+\section{Jika halaman menolak terbuka}
+
+Jangan langsung menyalakan ulang semuanya. Periksa satu pintu setiap kali.
+
+Pertama, kunjungi \codepath{http://127.0.0.1:5000}. Jika alamat itu juga gagal, baca terminal Flask. Paket Python yang hilang biasanya menyebut namanya sendiri di sana.
+
+Jika dashboard terbuka tetapi lampu OTA menunjukkan offline, kunjungi URL status pada port 7000. Baca terminal Rust jika alamat itu gagal. Cargo mungkin masih mengompilasi, program lain mungkin memakai port tersebut, atau konfigurasi mungkin menghentikan startup.
+
+Jika kedua alamat bekerja di PC namun ESP32 kelak tidak dapat terhubung, arahkan perhatian ke alamat LAN, firewall, dan jaringan Wi-Fi. Itu pintu yang berbeda.
+
+Buka dashboard melalui HTTP. Membuka \codepath{web/index.html} dengan klik ganda menghasilkan halaman \codepath{file:///}. Origin browser-nya berbeda dan dapat membuat kode API yang sehat tampak rusak.
+
+\begin{checkpoint}
+Biarkan dua tab terbuka. Tab pertama berisi \codepath{http://localhost:5000}. Tab kedua berisi JSON status Axum. Cocokkan keduanya dengan dua jendela terminal. Sekarang Anda mempunyai garis awal yang bersih, bahkan tanpa ESP32.
+\end{checkpoint}

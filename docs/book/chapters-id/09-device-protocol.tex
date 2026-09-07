@@ -1,0 +1,139 @@
+\chapter{Melihat Perjalanan Sebuah Update OTA}
+
+\section{Dashboard meninggalkan pesan untuk perangkat}
+
+Menekan Deploy OTA tidak memaksa sambungan masuk ke ESP32. Dashboard memberi tahu Axum firmware mana yang seharusnya diinginkan perangkat. Axum menyimpan pilihan itu dengan status pending.
+
+ESP32 memeriksa server menurut jadwalnya sendiri. Pada pemeriksaan berikutnya, Axum menyerahkan pesan tersebut. Inilah pull-based update: perangkat memulai setiap percakapan jaringan.
+
+\begin{center}
+\begin{tcolorbox}[width=0.92\textwidth,colback=BookPaper,colframe=BookTealLight]
+\centering\ttfamily
+Anda menekan Deploy OTA\par
+$\downarrow$\par
+Axum mencatat firmware yang diinginkan\par
+$\downarrow$ ESP32 bertanya apakah ada update\par
+download $\rightarrow$ periksa $\rightarrow$ pasang $\rightarrow$ reboot\par
+$\downarrow$\par
+runtime baru melaporkan versinya
+\end{tcolorbox}
+\end{center}
+
+Board yang sedang tidur atau sementara offline dapat mengambil pesan itu nanti. PC tidak perlu mengetahui cara membuka koneksi menembus firewall board atau alamatnya yang berubah.
+
+\section{Perangkat memperkenalkan diri}
+
+Setelah Wi-Fi tersambung, runtime mengirim registrasi seperti ini:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "device_id": "ESP32-S3-A1B2C3D4E5F6",
+  "name": "Sensor node",
+  "chip": "esp32s3",
+  "current_version": "1.0.0",
+  "ip_address": "192.168.1.24"
+}
+\end{lstlisting}
+
+Permintaan tersebut membuat kartu pada halaman Devices. Server menerima device ID rapi yang tersusun dari huruf, angka, titik, dash, atau underscore.
+
+Runtime kemudian mengirim heartbeat pada setiap siklus. Heartbeat adalah pesan singkat ``saya masih di sini'' yang membawa versi, status, dan IP terkini. Axum memperbarui \codepath{last_seen} setiap kali pesan tiba.
+
+Kartu lama dapat tetap terlihat setelah board kehilangan daya. Periksa \codepath{last_seen} sebelum mempercayai tulisan Online.
+
+\section{Pemeriksaan update mengembalikan manifest kecil}
+
+Saat tidak ada firmware yang ditugaskan, perangkat menerima:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{"update_available": false}
+\end{lstlisting}
+
+Saat versi \codepath{1.0.1} menunggu, perangkat menerima deskripsi binary yang tepat:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "update_available": true,
+  "firmware_id": "c53b...",
+  "version": "1.0.1",
+  "target": "esp32s3",
+  "size": 945332,
+  "sha256": "f2534c...",
+  "download_url": "http://192.168.1.5:7000/api/ota/firmware/c53b.../download"
+}
+\end{lstlisting}
+
+Perangkat memeriksa target, ukuran, bentuk hash, dan URL sebelum membuka OTA writer. Server juga mencegah firmware ESP32-S3 ditugaskan kepada chip lain.
+
+\section{Binary berpindah satu cangkir setiap kali}
+
+Ukuran image firmware dapat jauh lebih besar daripada RAM kosong pada perangkat kecil. Karena itu, client memakai buffer 4 KiB.
+
+Bayangkan memindahkan air dari sebuah drum memakai satu cangkir. Baca satu cangkir dari HTTP. Tuangkan ke slot flash yang tidak aktif. Masukkan byte yang sama ke perhitungan SHA-256 yang sedang berjalan. Ulangi sampai respons selesai. Seluruh isi drum tidak pernah perlu ditampung di memori.
+
+Saat byte datang, runtime melaporkan kemajuan download kira-kira setiap lima persen. Di ujung proses, runtime memeriksa jumlah byte keseluruhan dan membandingkan sidik jari akhir dengan nilai dari server.
+
+Jika ukuran atau hash berbeda, writer dibatalkan. Aplikasi yang sedang berjalan tetap tidak tersentuh.
+
+\section{Perangkat menceritakan jalannya update}
+
+Status callback membuat dashboard dapat mengikuti proses:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{"status":"downloading","progress":35}
+{"status":"verifying","progress":100}
+{"status":"installing","progress":100}
+{"status":"rebooting","progress":100}
+\end{lstlisting}
+
+Kegagalan membawa alasannya:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "status": "failed",
+  "error": "SHA256 mismatch"
+}
+\end{lstlisting}
+
+Setelah reboot, image baru menjalankan setup. Jika setup berhasil, runtime menandai slot sebagai valid lalu melaporkan:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "status": "success",
+  "progress": 100,
+  "current_version": "1.0.1"
+}
+\end{lstlisting}
+
+Axum mengosongkan desired firmware. Rilis yang sama tidak akan terus ditawarkan pada setiap polling.
+
+\section{Lihat isi tabel partisi dua laci}
+
+Contoh untuk flash 4 MiB yang disediakan adalah:
+
+\begin{lstlisting}[numbers=none]
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xf000,   0x2000
+phy_init, data, phy,     0x11000,  0x1000
+ota_0,    app,  ota_0,   0x20000,  0x1e0000
+ota_1,    app,  ota_1,   0x200000, 0x1e0000
+\end{lstlisting}
+
+\codepath{otadata} mengingat slot aplikasi mana yang perlu di-boot. \codepath{ota_0} dan \codepath{ota_1} adalah dua lacinya. ESP-IDF memilih laci yang tidak aktif. Kode aplikasi tidak boleh menganggap satu slot selalu menjadi pemenang.
+
+\section{Rollback memberi masa percobaan kepada image baru}
+
+Contoh mengaktifkan \codepath{CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y}. Ketika image OTA boot untuk pertama kali, slot tersebut belum terverifikasi.
+
+Runtime memanggil fungsi setup milik aplikasi. Setup yang berhasil membuat slot ditandai valid. Setup yang gagal membuatnya ditandai invalid dan meminta reboot. Bootloader yang memahami rollback kemudian dapat kembali ke slot valid sebelumnya.
+
+Jaring pengaman ini bergantung pada kerja sama tabel partisi, konfigurasi bootloader, dan panggilan validasi aplikasi. Ujilah dengan setup yang sengaja gagal pada hardware Anda sebelum mengandalkannya.
+
+\begin{warningbox}
+SHA-256 dan HTTP biasa cukup untuk pemeriksaan kerusakan data pada LAN pengembangan yang dipercaya. Perangkat produksi juga membutuhkan rencana keaslian, misalnya signed image, kunci yang dilindungi, Secure Boot, dan kebijakan transport yang dirancang dengan sengaja.
+\end{warningbox}
+
+\begin{checkpoint}
+Ceritakan perjalanan update tanpa menyebut nama endpoint: tinggalkan pesan, biarkan board bertanya, pindahkan image dengan cangkir kecil, bandingkan sidik jari, tukar laci, uji startup, lalu laporkan versi baru. Setelah itu, cocokkan setiap langkah dengan kode atau layar dashboard.
+\end{checkpoint}

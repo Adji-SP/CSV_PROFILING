@@ -1,0 +1,123 @@
+\chapter{When Something Goes Wrong}
+
+\section{Sit with the last thing that worked}
+
+An error becomes easier when you give it an address. Ask one question: what was the last step that definitely worked?
+
+If the dashboard never opened, stay with Flask. If CSV works and the OTA light is dark, stay with Axum. If Axum accepted the ZIP and Cargo failed, stay with the build log. If the PC can download the binary and the board cannot, stay with the network between them.
+
+This habit is slower for ten seconds and faster for the next hour.
+
+\section{The dashboard page will not open}
+
+Look at the Flask terminal. If it names a missing package, install \codepath{python/requirements.txt} into \codepath{python/.venv}. Then try:
+
+\begin{lstlisting}[numbers=none]
+http://127.0.0.1:5000/
+\end{lstlisting}
+
+If that address opens, Flask is serving the page. If the page has no style or buttons do nothing, open \codepath{/style.css} and \codepath{/app.js} on the same port to see whether those files are served.
+
+Do not open \codepath{index.html} by double-clicking it. The resulting \codepath{file:///} page lives in a different browser world from the Flask-served dashboard.
+
+\section{CSV works and OTA says offline}
+
+Open:
+
+\begin{lstlisting}[numbers=none]
+http://localhost:7000/api/ota/status
+\end{lstlisting}
+
+If it fails, read the Axum terminal. Cargo may still be compiling. Configuration may contain a bad port or URL. Another program may already own port 7000.
+
+If the status opens in its own tab but the dashboard request is blocked, open the browser's Network panel and look for CORS. Compare the dashboard's exact origin with \codepath{OTA_ALLOWED_ORIGINS}.
+
+\section{The ZIP is turned away}
+
+Read the error body before repacking anything. It usually points to one of these:
+
+\begin{itemize}
+  \item the chosen file is not a ZIP;
+  \item \codepath{Cargo.toml} is missing;
+  \item \codepath{ota-app.toml} uses an old API version;
+  \item \codepath{src/main.rs} is missing or the entrypoint points outside the project;
+  \item a local dependency reaches outside the archive;
+  \item the archive contains a symlink or unsafe path;
+  \item the encoded or extracted size is too large.
+\end{itemize}
+
+Open the ZIP and look at its first level. The clean managed layout is \codepath{Cargo.toml}, \codepath{ota-app.toml}, and \codepath{src}.
+
+\section{The build stops before your code appears}
+
+The first log lines test \codepath{cargo}, \codepath{rustc}, and \codepath{espflash}. If one is missing, run its \codepath{--version} command in the same terminal environment used by Axum.
+
+After installing a tool, close and restart the OTA terminal. A running process keeps the environment it had when it started.
+
+On Windows, \codepath{link.exe not found} points to Visual Studio Build Tools with Desktop development with C++. The Espressif toolchain alone does not supply that host linker.
+
+\section{Rust gives you a page of compiler errors}
+
+Scroll to the first clear error with a source path and line number. Later errors often grow from that first one.
+
+For an uploaded application, check the basic handshake:
+
+\begin{lstlisting}[language=Rust,numbers=none]
+pub fn setup(context: &mut AppContext) -> anyhow::Result<State>
+pub fn main(context: AppContext, state: State) -> anyhow::Result<()>
+\end{lstlisting}
+
+The state type returned by setup must match the second main parameter. Take hardware from \codepath{context.peripherals}. Check that new libraries support the ESP32-S3 ESP-IDF target.
+
+Make one correction and build again. Changing five things at once can hide which one mattered.
+
+\section{Cargo succeeds and image creation fails}
+
+Find the logged ELF path. The next lines should show the \codepath{espflash save-image} stage. Run \codepath{espflash --version} in the Axum terminal and confirm the expected command is available.
+
+The server will only accept a non-empty application image in \codepath{firmware-builds}. A successful Cargo line does not excuse a missing \codepath{.bin}.
+
+\section{The PC sees firmware and the board does not}
+
+Look at \codepath{public_base_url} in the status response. It must contain the PC's LAN IP. Then try that LAN URL from a phone or another computer on the same Wi-Fi.
+
+If the second device cannot open it, check the PC firewall, network profile, VPN routes, and access-point client isolation. If the second device can open it, compare the exact URL compiled into the ESP32 runtime.
+
+\section{The device card never appears}
+
+The dashboard does not discover USB devices. Registration must come from the running ESP32 program.
+
+Open the serial monitor. Look first for Wi-Fi connection. Then look for the registration POST. Confirm that the board received the right SSID, password, and LAN server URL during its build.
+
+If Wi-Fi provisioning has never happened, return to the first USB flash in Chapter 7.
+
+\section{The card stays on Pending}
+
+Pending means Axum saved the deployment. It has not heard completion from the device.
+
+Check \codepath{last_seen}. The runtime normally polls every thirty seconds. Make sure the desired version differs from the current version and the device chip matches the firmware target. The serial terminal should show the next update check or its network error.
+
+\section{Size or SHA-256 does not match}
+
+The runtime aborts the inactive writer. That is the safe response. A size mismatch suggests a truncated download or wrong metadata. A hash mismatch means the received bytes do not match the artifact Axum recorded.
+
+Download the same firmware on the PC, inspect the file size, and compare its hash with the metadata. Do not remove the device-side check to make the update continue.
+
+\section{The binary has outgrown its drawer}
+
+The sample OTA slots are each \codepath{0x1e0000} bytes. Compare the binary size with the real partition size. Reduce code or dependencies first. A larger slot requires a carefully revised partition table and usually a new serial provisioning step.
+
+\section{Delete answers with 409 Conflict}
+
+The firmware still belongs to a device's desired state or deployment history. The refusal protects those links. Do not delete the binary by hand while SQLite still points to it.
+
+\section{Where are the ESP32 terminal messages?}
+
+They are still in the serial monitor. Build History shows PC compiler output. Devices shows heartbeats and OTA status. Current dashboard code does not stream board logs.
+
+Use \codepath{espflash monitor} today. The next chapter shows how a future serial bridge or network logger could bring those messages into a clearly labeled dashboard panel.
+
+\begin{checkpoint}
+Take one real failure from your terminal. On paper, write the last successful step, the failing boundary, the smallest test for that boundary, and one change to try. Keep the original error beside the result.
+\end{checkpoint}
+

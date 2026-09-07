@@ -1,0 +1,130 @@
+\chapter{Apa yang Sebenarnya Terjadi pada ZIP}
+
+\section{Mulai dari formulir upload}
+
+Pada halaman OTA Firmware, formulir meminta tiga hal: sebuah ZIP, sebuah board, dan sebuah versi. Browser memasukkannya ke permintaan multipart dengan nama field berikut:
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{l l Y}
+\toprule
+Field & Contoh & Alasan server membutuhkannya\\
+\midrule
+\codepath{project} & \codepath{sensor.zip} & Kode Rust dan berkas Cargo\\
+\codepath{target} & \codepath{esp32s3} & Pilihan compiler dan chip\\
+\codepath{version} & \codepath{1.0.1} & Nama rilis yang akan dilaporkan firmware baru\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Axum memberi upload sebuah project ID acak. ID tersebut menjadi nama folder ekstraksi privat. Nama berkas yang diberikan browser tidak pernah diperbolehkan menentukan tempat penulisan server.
+
+\section{Server memeriksa koper sebelum membukanya}
+
+ZIP mirip koper dengan daftar tujuan untuk setiap isinya. Entri nakal dapat mengaku bahwa berkasnya harus diletakkan di \codepath{../../somewhere-else}. Jika nama itu diekstrak tanpa pemeriksaan, arsip dapat kabur dari kamarnya. Serangan ini sering disebut ZIP slip.
+
+Extractor menolak parent path, absolute path, symbolic link, isi lebih dari 10.000 entri, dan jumlah data hasil ekstraksi yang melampaui batas konfigurasi. Extractor juga mewajibkan adanya \codepath{Cargo.toml}.
+
+Pemeriksaan tersebut mungkin terasa ketat ketika ZIP buatan sendiri ditolak. Penjaga ini melindungi semua folder lain di PC. Perbaiki susunan ZIP dan biarkan batas keamanannya tetap berdiri.
+
+\section{Proyek memilih satu dari dua jalur}
+
+Setelah ekstraksi, \codepath{services/project.rs} mencari \codepath{ota-app.toml}.
+
+Jika berkas itu ada, proyek diperlakukan sebagai \emph{managed application}. Proyek memberikan perilaku produk, sedangkan runtime stabil memberikan Wi-Fi, OTA, dan rollback.
+
+\begin{lstlisting}[language=TOML,numbers=none]
+schema_version = 1
+application_api_version = 2
+entrypoint = "src/main.rs"
+\end{lstlisting}
+
+Jika berkas tersebut tidak ada, proyek menjadi \emph{standalone firmware}. Axum membangunnya sebagaimana proyek datang. Proyek standalone harus membawa client OTA sendiri jika ingin memperbarui dirinya lagi.
+
+Managed mode lebih mudah untuk aplikasi pertama. Anda dapat menulis perilaku sensor tanpa menyalin kode jaringan dan partisi ke dalam setiap upload.
+
+\section{Bagaimana dua berkas bernama main.rs hidup bersama}
+
+Bagian ini layak dibaca pelan-pelan.
+
+Runtime stabil mempunyai executable biasa \codepath{fn main()} di \codepath{examples/esp32-rust-ota-client/src/main.rs}. Ia memiliki proses boot, Wi-Fi, OTA, dan startup aplikasi.
+
+ZIP Anda juga mempertahankan \codepath{src/main.rs} dengan bentuk yang terasa seperti program firmware biasa. Berkas tersebut mengekspor dua fungsi bebas:
+
+\begin{lstlisting}[language=Rust]
+pub fn setup(context: &mut AppContext) -> anyhow::Result<State>;
+pub fn main(context: AppContext, state: State) -> anyhow::Result<()>;
+\end{lstlisting}
+
+Axum menyalin runtime stabil ke workspace hasil generate yang privat. Aplikasi ditempatkan di \codepath{applications/device-app}, lalu hanya manifest Cargo pada salinan itu yang disesuaikan. Di dalam salinan tersebut, Cargo memperlakukan \codepath{src/main.rs} aplikasi sebagai berkas sumber library. Runtime kemudian dapat memanggil \codepath{device_app::setup} dan \codepath{device_app::main}.
+
+Berkas yang Anda upload tidak berubah. Rust menautkan kedua bagian menjadi satu image lengkap.
+
+\begin{mentorbox}[Gambaran sebuah dapur]
+Runtime stabil adalah dapur yang sudah memiliki listrik, air, dan aturan keselamatan. Upload Anda adalah resep yang dimasak hari ini. Hidangan akhir memerlukan keduanya. Resep baru tidak menumpuk dapur kedua di atas dapur pertama.
+\end{mentorbox}
+
+\section{Builder memeriksa alatnya}
+
+Runner perintah yang sebenarnya berada di \codepath{services/builder.rs}. Sebelum menyentuh proyek, ia menanyakan versi kepada tiga program:
+
+\begin{lstlisting}
+cargo --version
+rustc --version
+espflash --version
+\end{lstlisting}
+
+Alat yang hilang menghasilkan catatan build gagal dengan pesan jelas. Axum tetap hidup, sehingga lingkungan dapat diperbaiki dan build baru dapat dicoba.
+
+Builder berada di balik trait Rust kecil bernama \codepath{FirmwareBuilder}. Hari ini implementasinya menjalankan alat langsung pada PC. Kelak implementasi lain dapat menjalankannya di dalam container yang dikunci, sementara route API tetap sama.
+
+\section{Cargo mengubah source menjadi ELF}
+
+Perintah build-nya adalah:
+
+\begin{lstlisting}
+cargo build --release --target xtensa-esp32s3-espidf
+\end{lstlisting}
+
+Axum tidak menyusun kalimat shell dari teks upload. Ia menjalankan \codepath{cargo} lalu memberikan setiap argumen secara terpisah. Working directory-nya adalah workspace proyek yang sudah dijaga.
+
+Selama Cargo bekerja, server membaca kedua output stream baris demi baris dan menyimpannya di catatan build. Karena itu, dashboard dapat menampilkan pesan compiler asli. Build lama yang gagal pun tetap memiliki log berguna setelah browser di-refresh.
+
+\section{espflash menyiapkan image OTA}
+
+ELF dari Cargo berguna bagi alat pengembangan, sedangkan partisi OTA yang tidak aktif memerlukan image aplikasi ESP-IDF. Perintah berikutnya mengikuti bentuk ini:
+
+\begin{lstlisting}
+espflash save-image --chip esp32s3 --format esp-idf \
+  <ELF_FILE> firmware-sensor-v1.0.1-a8c4f2.bin
+\end{lstlisting}
+
+Builder secara sengaja meminta application image. Ia tidak membuat merged factory image yang ikut membawa bootloader dan data partisi. Bagian lebih besar tersebut dipasang ketika provisioning awal melalui USB.
+
+\section{Sidik jari menutup paket}
+
+Server membaca berkas \codepath{.bin} yang selesai dan menghitung SHA-256. Anggap hash sebagai sidik jari panjang. Perangkat menghitung sidik jari yang sama selama download. Jika kedua string berbeda, byte sudah berubah atau berkas yang tiba bukan berkas yang diminta. Perangkat pun menolak mengaktifkannya.
+
+Saat berhasil, SQLite menerima nama berkas, ukuran byte, target, versi, project ID, build ID, timestamp, dan hash. Dashboard kemudian menambahkan image ke tabel firmware.
+
+\begin{mentorbox}[Sidik jari berbeda dari tanda tangan]
+SHA-256 menangkap kerusakan data. Hash tidak memberi tahu perangkat siapa yang menyetujui firmware tersebut. Identitas penerbit pada sistem produksi membutuhkan signing yang nyata dan kunci yang dilindungi. Proyek ini menyisakan batas tersebut dengan jelas untuk pengembangan berikutnya.
+\end{mentorbox}
+
+\section{Baca status build sebagai cerita pendek}
+
+\begin{center}
+\ttfamily uploaded $\rightarrow$ queued $\rightarrow$ building $\rightarrow$ success\par
+\hspace*{7.4cm}$\searrow$ failed
+\end{center}
+
+Uploaded berarti koper lolos pemeriksaan. Queued berarti catatan build sudah dibuat. Building berarti alat sedang bekerja. Success berarti binary dan metadata benar-benar ada. Failed berarti log menyimpan alasan perjalanan berhenti.
+
+Hanya satu build queued atau aktif yang diperbolehkan untuk proyek yang sama. Klik kedua menerima conflict, sehingga dua compiler tidak bertabrakan di folder kerja yang sama.
+
+\begin{warningbox}[ZIP milik Anda tetap dapat menjalankan kode di PC]
+Cargo dapat menjalankan \codepath{build.rs}, procedural macro, dan build script milik dependensi. Ekstraksi aman menjaga path, tetapi proses kompilasi tetap menjalankan kode. Gunakan proyek yang dipercaya sampai builder berada di dalam sandbox yang layak.
+\end{warningbox}
+
+\begin{checkpoint}
+Buka \codepath{examples/uploaded-firmware-basic}. Pastikan root ZIP-nya akan berisi \codepath{Cargo.toml}, \codepath{ota-app.toml}, dan \codepath{src/main.rs}. Upload sebagai versi \codepath{1.0.1}, lalu perhatikan log. Toolchain lengkap harus menghasilkan binary sungguhan. Alat yang hilang harus menghasilkan kegagalan sungguhan. Kedua hasil itu sama-sama berkata jujur.
+\end{checkpoint}

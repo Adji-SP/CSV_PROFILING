@@ -1,0 +1,140 @@
+\chapter{Watch an OTA Update Travel}
+
+\section{The dashboard leaves a note for the device}
+
+Pressing Deploy OTA does not force a connection into the ESP32. The dashboard tells Axum which firmware the device should want. Axum records that choice as pending.
+
+The ESP32 checks the server on its own schedule. On the next check, Axum hands back the note. This is a pull-based update: the device opens every network conversation.
+
+\begin{center}
+\begin{tcolorbox}[width=0.92\textwidth,colback=BookPaper,colframe=BookTealLight]
+\centering\ttfamily
+You press Deploy OTA\par
+$\downarrow$\par
+Axum records the desired firmware\par
+$\downarrow$ the ESP32 asks for an update\par
+download $\rightarrow$ check $\rightarrow$ install $\rightarrow$ reboot\par
+$\downarrow$\par
+the new runtime reports its version
+\end{tcolorbox}
+\end{center}
+
+A sleeping or temporarily offline board can catch the note later. The PC does not need to know how to open a connection through the board's firewall or changing address.
+
+\section{The device introduces itself}
+
+Once Wi-Fi is connected, the runtime posts a registration like this:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "device_id": "ESP32-S3-A1B2C3D4E5F6",
+  "name": "Sensor node",
+  "chip": "esp32s3",
+  "current_version": "1.0.0",
+  "ip_address": "192.168.1.24"
+}
+\end{lstlisting}
+
+That request creates the card on the Devices page. The server accepts a tidy device ID made from letters, numbers, dots, dashes, or underscores.
+
+The runtime then sends a heartbeat during each cycle. A heartbeat is a short ``I am still here'' message with the current version, status, and IP. Axum updates \codepath{last_seen} each time.
+
+An old card can remain after a board loses power. Look at \codepath{last_seen} before trusting the word Online.
+
+\section{The update check returns a small manifest}
+
+When nothing is assigned, the device receives:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{"update_available": false}
+\end{lstlisting}
+
+When version \codepath{1.0.1} is waiting, it receives a description of the exact binary:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "update_available": true,
+  "firmware_id": "c53b...",
+  "version": "1.0.1",
+  "target": "esp32s3",
+  "size": 945332,
+  "sha256": "f2534c...",
+  "download_url": "http://192.168.1.5:7000/api/ota/firmware/c53b.../download"
+}
+\end{lstlisting}
+
+The device checks the target, size, hash shape, and URL before opening an OTA writer. The server also prevents you from assigning ESP32-S3 firmware to a differently registered chip.
+
+\section{The binary moves one cup at a time}
+
+A firmware image can be much larger than the spare RAM on a small device. The client therefore uses a 4 KiB buffer.
+
+Picture moving water from a barrel with one cup. Read a cup from HTTP. Pour it into the inactive flash slot. Add those same bytes to the running SHA-256 calculation. Repeat until the response ends. The whole barrel never has to sit in memory.
+
+As bytes arrive, the runtime reports downloading progress in roughly five-percent steps. At the end it checks the total byte count and compares the finished fingerprint with the server's value.
+
+If size or hash differs, the writer is aborted. The current running application remains untouched.
+
+\section{The device narrates the update}
+
+Status callbacks let the dashboard follow along:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{"status":"downloading","progress":35}
+{"status":"verifying","progress":100}
+{"status":"installing","progress":100}
+{"status":"rebooting","progress":100}
+\end{lstlisting}
+
+A failure carries the reason:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "status": "failed",
+  "error": "SHA256 mismatch"
+}
+\end{lstlisting}
+
+After reboot, the new image runs setup. If that succeeds, the runtime marks the slot valid and reports:
+
+\begin{lstlisting}[language=JSON,numbers=none]
+{
+  "status": "success",
+  "progress": 100,
+  "current_version": "1.0.1"
+}
+\end{lstlisting}
+
+Axum clears the desired firmware. The device will not be offered the same release on every poll.
+
+\section{Look inside the two-drawer partition table}
+
+The supplied 4 MiB example is:
+
+\begin{lstlisting}[numbers=none]
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xf000,   0x2000
+phy_init, data, phy,     0x11000,  0x1000
+ota_0,    app,  ota_0,   0x20000,  0x1e0000
+ota_1,    app,  ota_1,   0x200000, 0x1e0000
+\end{lstlisting}
+
+\codepath{otadata} remembers which application slot should boot. \codepath{ota_0} and \codepath{ota_1} are the two drawers. ESP-IDF chooses the inactive one; application code should not assume a fixed winner.
+
+\section{Rollback gives a new image a trial period}
+
+The example enables \codepath{CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y}. When an OTA image boots for the first time, its slot is unverified.
+
+The runtime calls your setup function. A successful setup marks the slot valid. A failed setup marks it invalid and asks for a reboot. The rollback-aware bootloader can then return to the previous valid slot.
+
+This safety net depends on the partition table, bootloader configuration, and application validation call working together. Test it with a deliberately failing setup on your own hardware before relying on it.
+
+\begin{warningbox}
+SHA-256 and plain HTTP are suitable for corruption checks on a trusted development LAN. A production device also needs an authenticity plan such as signed images, protected keys, Secure Boot, and an intentional transport policy.
+\end{warningbox}
+
+\begin{checkpoint}
+Tell the update story without endpoint names: leave a note, let the board ask, move the image in small cups, compare fingerprints, switch drawers, test startup, and report the new version. Then match each step to the code or dashboard screen.
+\end{checkpoint}
+

@@ -1,0 +1,9 @@
+[package]
+name = "ota-default-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+firmware-app-api = { path = "../../crates/application-api" }
+log = "0.4"

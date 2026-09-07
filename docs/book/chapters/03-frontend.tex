@@ -1,0 +1,114 @@
+\chapter{Walk Through the Dashboard}
+
+\section{Start with what your eyes can see}
+
+Keep the dashboard open beside the project folder. The dark strip on the left is the sidebar. The thin bar across the top tells you which page is active. The large pale area is where the current task appears.
+
+Click CSV Profiler, Previous Runs, OTA Firmware, Devices, and Build History. The browser does not load five separate HTML pages. It already has each section and shows one at a time.
+
+Now open \codepath{web/index.html}. Search for \codepath{ota-section}. You will find the OTA Firmware screen. A little farther down are \codepath{devices-section} and \codepath{builds-section}. The HTML is the dashboard's floor plan.
+
+\begin{mentorbox}[A useful beginner habit]
+When a button behaves strangely, find its \codepath{id} in the HTML first. Then search that same ID in JavaScript. This is often faster than reading an entire script from the top.
+\end{mentorbox}
+
+\section{Meet the frontend files one by one}
+
+Only four files need our attention:
+
+\begin{description}
+  \item[\codepath{web/index.html}] The objects on the page: links, headings, forms, tables, dialogs, and empty states.
+  \item[\codepath{web/style.css}] Their appearance: spacing, color, borders, cards, buttons, badges, progress bars, and the dark build terminal.
+  \item[\codepath{web/app.js}] The behavior of CSV pages.
+  \item[\codepath{web/ota.js}] The behavior of OTA Firmware, Devices, and Build History.
+\end{description}
+
+The HTML loads both scripts near its closing tag:
+
+\begin{lstlisting}[language=HTML,numbers=none]
+<script src="app.js"></script>
+<script src="ota.js"></script>
+\end{lstlisting}
+
+That order lets the old CSV script keep its place. OTA behavior arrives beside it in a separate file.
+
+\section{A button is a short chain of events}
+
+Look at the Upload \& Build button in \codepath{index.html}. Its ID is \codepath{ota-build-btn}. Search for that text in \codepath{ota.js}. You will find the event handler that reads the chosen file, target, and version.
+
+The chain looks like this:
+
+\begin{center}
+\ttfamily click $\rightarrow$ read form $\rightarrow$ call Axum $\rightarrow$ update the page
+\end{center}
+
+That same pattern appears throughout the dashboard. A navigation link changes visible sections. A refresh button calls a list endpoint and rebuilds a table. A deploy button opens a dialog, then sends the selected firmware ID.
+
+You do not have to understand every line before making sense of the flow. Find the HTML object, find its listener, then follow the function it calls.
+
+\section{Why there are two API addresses}
+
+At the top of the scripts you will see:
+
+\begin{lstlisting}[language=JavaScript]
+const API_BASE = "http://localhost:5000";
+const OTA_API_BASE = "http://localhost:7000";
+\end{lstlisting}
+
+These two lines are tiny signposts. CSV requests travel to Flask. Firmware and device requests travel to Axum. Do not merge the constants just because both services run on the same PC.
+
+The OTA script wraps its repeated request work in \codepath{otaRequest}. In plain language, that helper says: send the request, check whether it succeeded, read a useful server error when it failed, and decode JSON when a body is present.
+
+\begin{lstlisting}[language=JavaScript]
+async function getDevices() {
+  return otaRequest("/api/ota/devices");
+}
+
+async function deployFirmware(deviceId, firmwareId) {
+  return otaRequest(`/api/ota/devices/${deviceId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ firmware_id: firmwareId })
+  });
+}
+\end{lstlisting}
+
+The first function is a question. The second is an instruction. Both travel through the same careful messenger.
+
+\section{Watch the OTA build page change mood}
+
+Choose a ZIP and press Upload \& Build. Even before the compiler starts, the page moves through small states:
+
+\begin{description}
+  \item[Idle] Nothing has been submitted.
+  \item[Uploading] The browser is sending the archive.
+  \item[Queued] Axum has made a build record.
+  \item[Building] The tools on the PC are working.
+  \item[Success] A real binary and fingerprint were saved.
+  \item[Failed] Something stopped the build, and the log tells us where.
+\end{description}
+
+The frontend asks for the build record every few seconds. This is called polling. Imagine looking through the workshop window now and then instead of keeping someone on the phone for the whole build.
+
+Compiler errors remain in the terminal panel. A toast may say the build failed, but the dark log area carries the useful details. Scroll upward to find the first clear error.
+
+\section{Understand the device cards}
+
+The Devices page is a view of what Axum remembers. It does not scan the room for Wi-Fi boards. A real ESP32 puts itself on that page by registering and sending heartbeats.
+
+Each card shows its last reported version, desired version, network address, last-seen time, and OTA progress. If a board loses power, its old card may remain. The timestamp tells you how fresh the information is.
+
+\section{Make one harmless visual change}
+
+Open \codepath{web/index.html} and find the subtitle under OTA Firmware. Change a few words, save the file, and refresh the dashboard. If the old words remain, use a hard refresh so the browser stops using its cached copy.
+
+Then undo your practice wording. You have just traced the simplest frontend loop: edit HTML, let Flask serve it, and let the browser draw it.
+
+\begin{mentorbox}[About the word terminal]
+The dark OTA terminal shows build output from the PC. It does not yet show messages printed by the ESP32. For now, use \codepath{espflash monitor} for board output. Chapter 12 describes two honest ways to bring those logs into the dashboard later.
+\end{mentorbox}
+
+\begin{checkpoint}
+Pick the Devices navigation link. Find its ID in \codepath{index.html}, its click listener in JavaScript, the function that loads devices, and the Axum route it calls. Write those four names on paper as a small trail.
+\end{checkpoint}
+
