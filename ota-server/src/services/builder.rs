@@ -1,13 +1,15 @@
 use std::{
+    env,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
+    sync::Arc,
 };
 
 use async_trait::async_trait;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
-    sync::mpsc::UnboundedSender,
+    sync::{Mutex, mpsc::UnboundedSender},
 };
 
 use crate::services::firmware::sanitize_component;
@@ -68,26 +70,82 @@ pub trait FirmwareBuilder: Send + Sync {
     ) -> Result<BuildArtifact, BuildFailure>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalFirmwareBuilder {
     build_dir: PathBuf,
     runtime_template_dir: PathBuf,
+    cargo_target_dir: PathBuf,
+    esp_idf_tools_dir: Option<PathBuf>,
+    python_path: Option<PathBuf>,
     public_base_url: String,
     rust_toolchain: Option<String>,
+    managed_environment: ManagedFirmwareEnvironment,
+    build_lock: Arc<Mutex<()>>,
+}
+
+#[derive(Clone, Default)]
+struct ManagedFirmwareEnvironment {
+    wifi_ssid: Option<String>,
+    wifi_password: Option<String>,
+    device_name: Option<String>,
+    device_id: Option<String>,
+}
+
+impl ManagedFirmwareEnvironment {
+    fn load() -> Self {
+        Self {
+            wifi_ssid: nonempty_env("WIFI_SSID"),
+            wifi_password: nonempty_env("WIFI_PASS"),
+            device_name: nonempty_env("DEVICE_NAME"),
+            device_id: nonempty_env("DEVICE_ID"),
+        }
+    }
+
+    fn apply(&self, command: &mut Command) -> Result<(), BuildFailure> {
+        let ssid = self.wifi_ssid.as_deref().ok_or_else(|| {
+            BuildFailure::new("WIFI_SSID is not configured for the managed firmware build")
+        })?;
+        let password = self.wifi_password.as_deref().ok_or_else(|| {
+            BuildFailure::new("WIFI_PASS is not configured for the managed firmware build")
+        })?;
+        command.env("WIFI_SSID", ssid).env("WIFI_PASS", password);
+        if let Some(name) = self.device_name.as_deref() {
+            command.env("DEVICE_NAME", name);
+        }
+        if let Some(device_id) = self.device_id.as_deref() {
+            command.env("DEVICE_ID", device_id);
+        }
+        Ok(())
+    }
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 impl LocalFirmwareBuilder {
     pub fn new(
         build_dir: PathBuf,
         runtime_template_dir: PathBuf,
+        cargo_target_dir: PathBuf,
+        esp_idf_tools_dir: Option<PathBuf>,
+        python_path: Option<PathBuf>,
         public_base_url: String,
         rust_toolchain: Option<String>,
     ) -> Self {
         Self {
             build_dir,
             runtime_template_dir,
+            cargo_target_dir,
+            esp_idf_tools_dir,
+            python_path,
             public_base_url,
             rust_toolchain,
+            managed_environment: ManagedFirmwareEnvironment::load(),
+            build_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -125,6 +183,31 @@ impl LocalFirmwareBuilder {
         }
     }
 
+    fn apply_esp_idf_environment(&self, command: &mut Command) -> Result<(), BuildFailure> {
+        if let Some(directory) = self.esp_idf_tools_dir.as_ref() {
+            command.env(
+                "ESP_IDF_TOOLS_INSTALL_DIR",
+                format!("custom:{}", directory.display()),
+            );
+        }
+        if let Some(python) = self.python_path.as_ref() {
+            let python_dir = python.parent().ok_or_else(|| {
+                BuildFailure::new("OTA_PYTHON_PATH does not have a parent directory")
+            })?;
+            let mut paths = vec![python_dir.to_path_buf()];
+            if let Some(existing) = env::var_os("PATH") {
+                paths.extend(env::split_paths(&existing));
+            }
+            let joined = env::join_paths(paths).map_err(|error| BuildFailure {
+                message: "Could not prepare PATH for the configured Python executable".to_owned(),
+                details: Some(error.to_string()),
+                exit_code: None,
+            })?;
+            command.env("PATH", joined);
+        }
+        Ok(())
+    }
+
     fn target_spec(target: &str) -> Result<TargetSpec, BuildFailure> {
         match target {
             "esp32s3" => Ok(TargetSpec {
@@ -160,6 +243,7 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
             details: error.details,
             exit_code: None,
         })?;
+        let managed_application = matches!(inspection.kind, ProjectKind::ManagedApplication);
         let build_source = match inspection.kind {
             ProjectKind::Standalone => {
                 let _ = logs.send(
@@ -215,7 +299,12 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
             }
         };
 
-        let target_dir = request.project_dir.join(".ota-target");
+        // esp-idf-sys rejects long Windows OUT_DIR paths. All local builds use a
+        // deliberately short configured Cargo target directory. The lock keeps
+        // composition-to-image generation isolated when builds are queued at once.
+        let _build_guard = self.build_lock.lock().await;
+        let target_dir = &self.cargo_target_dir;
+        let _ = logs.send(format!("Cargo output directory: {}", target_dir.display()));
         let _ = logs.send(format!(
             "$ cargo build --release --target {}",
             spec.rust_target
@@ -227,9 +316,26 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
             .arg("--target")
             .arg(spec.rust_target)
             .current_dir(&build_source)
-            .env("CARGO_TARGET_DIR", &target_dir)
+            .env("CARGO_TARGET_DIR", target_dir)
             .env("FIRMWARE_VERSION", &request.version)
             .env("OTA_SERVER_URL", &self.public_base_url);
+        if managed_application {
+            self.managed_environment.apply(&mut cargo)?;
+            let _ = logs.send(
+                "Managed firmware network configuration loaded from the server environment"
+                    .to_owned(),
+            );
+        }
+        self.apply_esp_idf_environment(&mut cargo)?;
+        if let Some(directory) = self.esp_idf_tools_dir.as_ref() {
+            let _ = logs.send(format!(
+                "ESP-IDF tools directory: {}",
+                directory.display()
+            ));
+        }
+        if self.python_path.is_some() {
+            let _ = logs.send("Configured base Python added to the build PATH".to_owned());
+        }
         self.apply_toolchain(&mut cargo);
         let cargo_status = run_logged(cargo, logs.clone()).await?;
         if !cargo_status.success() {

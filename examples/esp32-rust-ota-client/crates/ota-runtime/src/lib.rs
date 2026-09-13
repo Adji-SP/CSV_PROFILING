@@ -6,7 +6,7 @@ use anyhow::{bail, ensure, Context, Result};
 use embedded_svc::http::client::Client as HttpClient;
 use esp_idf_svc::{
     http::client::{EspHttpConnection, Method},
-    io::{self, Read, Write},
+    io::{utils::try_read_full, Write},
     ota::{EspOta, SlotState},
 };
 use log::{error, info, warn};
@@ -226,7 +226,7 @@ fn get_update(
         bail!("Update endpoint returned HTTP {}", response.status());
     }
     let mut buffer = [0_u8; 4096];
-    let count = io::try_read_full(&mut response, &mut buffer).map_err(|error| error.0)?;
+    let count = try_read_full(&mut response, &mut buffer).map_err(|error| error.0)?;
     let update: UpdateResponse = serde_json::from_slice(&buffer[..count])?;
     if update.version.as_deref() == Some(config.current_version.as_str()) {
         return Ok(None);
@@ -377,7 +377,7 @@ fn post_json<T: Serialize>(
 }
 
 pub fn running_image_is_unverified() -> Result<bool> {
-    let mut ota = EspOta::new()?;
+    let ota = EspOta::new()?;
     let slot = ota.get_running_slot()?;
     if slot.state == SlotState::Unknown {
         warn!("Running OTA slot state is unknown; leaving it unchanged");

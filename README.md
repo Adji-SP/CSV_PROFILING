@@ -98,6 +98,24 @@ OTA_PUBLIC_BASE_URL=http://192.168.1.5:7000
 `OTA_RUNTIME_DIR` selects the stable ESP32 runtime template used for managed
 application builds. The default is `examples/esp32-rust-ota-client`.
 
+On native Windows, set `OTA_CARGO_TARGET_DIR` to a writable absolute path no
+longer than 10 characters, such as `F:/csv-esp` or `C:/ota`. Forward slashes
+keep the value portable through `.env` parsing. `esp-idf-sys`
+rejects the much longer Cargo output path beneath an uploaded project's UUID;
+Windows `subst` drives do not bypass that check. The server serializes local
+firmware builds that share this short Cargo cache.
+
+Also set `OTA_ESP_IDF_TOOLS_DIR` to the short ESP-IDF cache installed for the
+device toolchain (for example `F:/csv-idf`) and `OTA_PYTHON_PATH` to a real base
+Python executable. Dashboard builds pass these settings to `esp-idf-sys`, so it
+does not clone ESP-IDF beneath the uploaded project's long UUID path or invoke
+the Microsoft Store Python alias.
+
+For managed application uploads, `WIFI_SSID`, `WIFI_PASS`, `DEVICE_NAME`, and
+the optional `DEVICE_ID` are read from the server's `.env` and embedded at
+compile time. The password is never written to the build log. Restart the OTA
+server after changing these values.
+
 CORS defaults to only `http://localhost:5000` and `http://127.0.0.1:5000`. Add separately served frontend origins to `OTA_ALLOWED_ORIGINS` as a comma-separated list.
 
 ## Run locally

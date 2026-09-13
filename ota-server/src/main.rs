@@ -33,6 +33,9 @@ async fn main() -> ApiResult<()> {
     let builder = Arc::new(LocalFirmwareBuilder::new(
         config.build_dir.clone(),
         config.runtime_template_dir.clone(),
+        config.cargo_target_dir.clone(),
+        config.esp_idf_tools_dir.clone(),
+        config.python_path.clone(),
         config.public_base_url.clone(),
         config.rust_toolchain.clone(),
     ));

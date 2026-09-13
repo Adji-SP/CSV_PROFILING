@@ -36,10 +36,11 @@ if errorlevel 1 (
 )
 
 echo Starting CSV Profiler on http://localhost:5000
-start "CSV Profiler :5000" cmd /k "cd /d ""%PROJECT_ROOT%"" && ""%PYTHON_EXE%"" python\profiler_server.py"
+rem START sets the working directory, avoiding nested CMD executable quotes.
+start "CSV Profiler :5000" /d "%PROJECT_ROOT%" cmd /d /k python\.venv\Scripts\python.exe python\profiler_server.py
 
 echo Starting Rust OTA Server on http://localhost:7000
-start "OTA Server :7000" cmd /k "cd /d ""%PROJECT_ROOT%ota-server"" && %CARGO_RUN%"
+start "OTA Server :7000" /d "%PROJECT_ROOT%ota-server" cmd /d /k %CARGO_RUN%
 
 echo Waiting for the CSV Profiler...
 set /a WAIT_COUNT=0

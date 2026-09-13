@@ -12,4 +12,9 @@ build-std = ["std", "panic_abort"]
 [env]
 MCU = "esp32s3"
 ESP_IDF_VERSION = "v5.3.3"
-
+ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults"
+# Keep sdkconfig.defaults discoverable when Windows builds use a short target path.
+CARGO_WORKSPACE_DIR = { value = "", relative = true }
+# ESP-IDF builds in a generated CMake directory; provide its custom partition CSV.
+ESP_IDF_GLOB_BASE = { value = "", relative = true }
+ESP_IDF_GLOB_PARTITIONS = "partitions.csv"

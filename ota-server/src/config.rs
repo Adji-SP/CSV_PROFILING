@@ -15,6 +15,9 @@ pub struct Config {
     pub build_dir: PathBuf,
     pub data_dir: PathBuf,
     pub runtime_template_dir: PathBuf,
+    pub cargo_target_dir: PathBuf,
+    pub esp_idf_tools_dir: Option<PathBuf>,
+    pub python_path: Option<PathBuf>,
     pub max_upload_bytes: usize,
     pub max_extracted_bytes: u64,
     pub allowed_origins: Vec<String>,
@@ -28,8 +31,15 @@ impl Config {
             .ok_or_else(|| ApiError::internal("CONFIG_ERROR", "Cannot locate workspace root"))?
             .to_path_buf();
 
-        let _ = dotenvy::from_path(workspace_root.join(".env"));
-        let _ = dotenvy::dotenv();
+        let env_path = workspace_root.join(".env");
+        if env_path.is_file() {
+            dotenvy::from_path(&env_path).map_err(|error| {
+                ApiError::internal(
+                    "INVALID_ENV_FILE",
+                    format!("Could not parse {}: {error}", env_path.display()),
+                )
+            })?;
+        }
 
         let bind_address = env::var("OTA_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_owned());
         let port = parse_env("OTA_PORT", 7000_u16)?;
@@ -62,8 +72,59 @@ impl Config {
             env::var("OTA_RUNTIME_DIR").ok(),
             "examples/esp32-rust-ota-client",
         );
+        let cargo_target_dir = match env::var("OTA_CARGO_TARGET_DIR") {
+            Ok(value) if !value.trim().is_empty() => PathBuf::from(value.trim()),
+            _ if cfg!(windows) => {
+                return Err(ApiError::internal(
+                    "INVALID_CONFIG",
+                    "Set OTA_CARGO_TARGET_DIR to a writable absolute path no longer than 10 characters on Windows (for example F:\\csv-esp)",
+                ));
+            }
+            _ => workspace_root.join("ota-server/target/firmware"),
+        };
 
-        for directory in [&project_dir, &build_dir, &data_dir] {
+        if cfg!(windows) {
+            if !cargo_target_dir.is_absolute() {
+                return Err(ApiError::internal(
+                    "INVALID_CONFIG",
+                    "OTA_CARGO_TARGET_DIR must be an absolute path on Windows",
+                ));
+            }
+            if cargo_target_dir.to_string_lossy().chars().count() > 10 {
+                return Err(ApiError::internal(
+                    "INVALID_CONFIG",
+                    "OTA_CARGO_TARGET_DIR must be no longer than 10 characters on Windows because esp-idf-sys rejects longer build paths",
+                ));
+            }
+        }
+
+        let esp_idf_tools_dir = optional_path_env("OTA_ESP_IDF_TOOLS_DIR");
+        if let Some(directory) = esp_idf_tools_dir.as_ref() {
+            if cfg!(windows) && !directory.is_absolute() {
+                return Err(ApiError::internal(
+                    "INVALID_CONFIG",
+                    "OTA_ESP_IDF_TOOLS_DIR must be an absolute path on Windows",
+                ));
+            }
+            std::fs::create_dir_all(directory).map_err(|error| {
+                ApiError::internal(
+                    "DIRECTORY_CREATE_FAILED",
+                    format!("Could not create {}: {error}", directory.display()),
+                )
+            })?;
+        }
+
+        let python_path = optional_path_env("OTA_PYTHON_PATH");
+        if let Some(path) = python_path.as_ref() {
+            if !path.is_file() {
+                return Err(ApiError::internal(
+                    "INVALID_CONFIG",
+                    format!("OTA_PYTHON_PATH does not point to a file: {}", path.display()),
+                ));
+            }
+        }
+
+        for directory in [&project_dir, &build_dir, &data_dir, &cargo_target_dir] {
             std::fs::create_dir_all(directory).map_err(|error| {
                 ApiError::internal(
                     "DIRECTORY_CREATE_FAILED",
@@ -93,6 +154,9 @@ impl Config {
             build_dir,
             data_dir,
             runtime_template_dir,
+            cargo_target_dir,
+            esp_idf_tools_dir,
+            python_path,
             max_upload_bytes: max_upload_mb.saturating_mul(1024 * 1024),
             max_extracted_bytes: (max_extracted_mb as u64).saturating_mul(1024 * 1024),
             allowed_origins,
@@ -117,6 +181,14 @@ impl Config {
             self.data_dir.join("ota.db").to_string_lossy()
         )
     }
+}
+
+fn optional_path_env(name: &str) -> Option<PathBuf> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn parse_env<T>(name: &str, default: T) -> ApiResult<T>
