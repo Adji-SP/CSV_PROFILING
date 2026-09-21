@@ -2,7 +2,7 @@
    OTA Firmware client - isolated from the Flask CSV API
 ===================================================== */
 
-const OTA_API_BASE = "http://localhost:7000";
+const OTA_API_BASE = location.protocol === "https:" ? location.origin : "http://localhost:7000";
 
 const otaProjectInput = document.getElementById("ota-project-input");
 const otaTarget = document.getElementById("ota-target");

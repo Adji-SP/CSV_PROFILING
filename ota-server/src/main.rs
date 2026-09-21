@@ -1,4 +1,7 @@
 mod config;
+mod console;
+#[cfg(test)]
+mod console_tests;
 mod errors;
 mod models;
 mod routes;
@@ -45,7 +48,15 @@ async fn main() -> ApiResult<()> {
         config.project_dir.clone(),
         config.build_dir.clone(),
     ));
+    let console = console::Console::new();
+    console.start_mqtt().map_err(|_| {
+        ApiError::internal(
+            "CONSOLE_CONFIG",
+            "Invalid MQTT console configuration; check broker credentials and TLS files",
+        )
+    })?;
     let state = AppState {
+        console,
         config: Arc::clone(&config),
         storage,
         coordinator,

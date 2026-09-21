@@ -8,6 +8,7 @@ use crate::errors::{ApiError, ApiResult};
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub console_only: bool,
     pub bind_address: String,
     pub port: u16,
     pub public_base_url: String,
@@ -33,10 +34,13 @@ impl Config {
 
         let env_path = workspace_root.join(".env");
         if env_path.is_file() {
-            dotenvy::from_path(&env_path).map_err(|error| {
+            dotenvy::from_path(&env_path).map_err(|_| {
                 ApiError::internal(
                     "INVALID_ENV_FILE",
-                    format!("Could not parse {}: {error}", env_path.display()),
+                    format!(
+                        "Could not parse {}; quote values containing spaces",
+                        env_path.display()
+                    ),
                 )
             })?;
         }
@@ -119,7 +123,10 @@ impl Config {
             if !path.is_file() {
                 return Err(ApiError::internal(
                     "INVALID_CONFIG",
-                    format!("OTA_PYTHON_PATH does not point to a file: {}", path.display()),
+                    format!(
+                        "OTA_PYTHON_PATH does not point to a file: {}",
+                        path.display()
+                    ),
                 ));
             }
         }
@@ -147,6 +154,7 @@ impl Config {
         };
 
         Ok(Self {
+            console_only: parse_env("OTA_CONSOLE_ONLY", false)?,
             bind_address,
             port,
             public_base_url: public_base_url.trim_end_matches('/').to_owned(),
@@ -176,8 +184,11 @@ impl Config {
     }
 
     pub fn database_url(&self) -> String {
+        if let Ok(url) = env::var("DATABASE_URL") {
+            return url;
+        }
         format!(
-            "sqlite://{}",
+            "sqlite://{}?mode=rwc",
             self.data_dir.join("ota.db").to_string_lossy()
         )
     }

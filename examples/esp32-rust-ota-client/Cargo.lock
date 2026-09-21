@@ -650,6 +650,7 @@ dependencies = [
  "log",
  "ota-default-app",
  "ota-runtime",
+ "serde_json",
  "wifi-manager",
 ]
 

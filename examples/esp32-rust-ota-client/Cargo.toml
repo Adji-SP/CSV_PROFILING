@@ -10,6 +10,7 @@ device-app = { package = "ota-default-app", path = "applications/default-app" }
 esp-idf-svc = "0.52.1"
 firmware-app-api = { path = "crates/application-api" }
 log = "0.4"
+serde_json = "1"
 ota-runtime = { path = "crates/ota-runtime" }
 wifi-manager = { path = "crates/wifi-manager" }
 

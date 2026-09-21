@@ -4,10 +4,11 @@
 //! `device-app` Cargo dependency supplies the product-specific application.
 
 use std::time::Duration;
+mod remote_console;
 
 use anyhow::{Context, Result};
 use esp_idf_svc::{
-    eventloop::EspSystemEventLoop, hal::peripherals::Peripherals, log::EspLogger,
+    eventloop::EspSystemEventLoop, hal::peripherals::Peripherals,
     nvs::EspDefaultNvsPartition,
 };
 use firmware_app_api::{AppContext, ApplicationPeripherals, DeviceInfo};
@@ -44,7 +45,6 @@ esp_idf_svc::sys::esp_app_desc!();
 
 fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
-    EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().context("ESP32 peripherals already acquired")?;
     let (modem, application_peripherals) = ApplicationPeripherals::split_esp32s3(peripherals);
@@ -60,6 +60,8 @@ fn main() -> Result<()> {
         },
     )?;
     let station_mac = wifi.station_mac()?;
+    let _sntp = esp_idf_svc::sntp::EspSntp::new_default()?;
+    remote_console::initialize()?;
     let device_id = DEVICE_ID_OVERRIDE
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format_device_id(station_mac));

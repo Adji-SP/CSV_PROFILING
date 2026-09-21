@@ -37,6 +37,7 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         <span>Build History</span>
       </a>
+      <a href="#" class="nav-item" id="nav-console"><span>Remote Console</span></a>
     </nav>
   </aside>
 
@@ -382,6 +383,23 @@
         </div>
       </section>
 
+      <section id="console-section" class="hidden">
+        <div class="page-title"><h1>Remote Console</h1><p>Live application logs over Wi-Fi. Recent history is temporary.</p></div>
+        <div class="card" style="padding:20px">
+          <label>Device <select id="console-device"></select></label>
+          <button class="btn-sm" id="console-refresh">Refresh devices</button>
+          <label>Console access token <input id="console-token" type="password" autocomplete="off"></label>
+          <button class="btn-sm" id="console-connect">Connect</button>
+          <button class="btn-sm" id="console-disconnect">Disconnect</button>
+          <p id="console-status" role="status">Disconnected</p>
+          <label>Level <select id="console-level"><option>ALL</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option><option>TRACE</option></select></label>
+          <label>Filter <input id="console-filter" type="search"></label>
+          <label><input id="console-scroll" type="checkbox" checked> Auto-scroll</label>
+          <button class="btn-sm" id="console-pause">Pause</button>
+          <button class="btn-sm" id="console-download">Download logs</button>
+          <pre id="console-output" style="height:55vh;overflow:auto;white-space:pre-wrap;background:#101820;color:#dbe7ee;padding:16px" aria-label="Device log output"></pre>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -429,5 +447,6 @@
 
   <script src="app.js"></script>
   <script src="ota.js"></script>
+  <script src="console.js"></script>
 </body>
 </html>

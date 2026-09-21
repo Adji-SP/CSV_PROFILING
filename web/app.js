@@ -6,7 +6,7 @@
    - POST /clean -> pandas operations + cleaned CSV download
 ===================================================== */
 
-const API_BASE    = "http://localhost:5000";
+const API_BASE    = location.protocol === "https:" ? location.origin : "http://localhost:5000";
 const SESSION_KEY = "csv_profiler_current_session";
 
 // -- DOM refs --------------------------------------------------
@@ -314,7 +314,7 @@ navBuilds?.addEventListener("click", (e) => {
 
 // -- Section helpers -------------------------------------------
 function showSection(id, activeNav = null) {
-  ["upload-section","progress-section","report-section","ota-section","devices-section","builds-section"].forEach((sid) => {
+  ["upload-section","progress-section","report-section","ota-section","devices-section","builds-section","console-section"].forEach((sid) => {
     document.getElementById(sid).classList.toggle("hidden", sid !== id);
   });
   newAnalysisBtn.style.display = id === "report-section" ? "inline-block" : "none";
@@ -325,6 +325,7 @@ function showSection(id, activeNav = null) {
     "ota-section":      { nav: "ota", title: "OTA Firmware" },
     "devices-section":  { nav: "devices", title: "Devices" },
     "builds-section":   { nav: "builds", title: "Build History" },
+    "console-section":  { nav: "console", title: "Remote Console" },
   }[id];
   setActiveNav(sectionMeta?.nav || "profiler");
   if (breadcrumbCurrent && sectionMeta) breadcrumbCurrent.textContent = sectionMeta.title;
@@ -332,6 +333,7 @@ function showSection(id, activeNav = null) {
 }
 
 function setActiveNav(active) {
+  document.getElementById("nav-console")?.classList.toggle("active", active === "console");
   navProfiler?.classList.toggle("active", active === "profiler");
   navRuns?.classList.toggle("active", active === "runs");
   navOta?.classList.toggle("active", active === "ota");

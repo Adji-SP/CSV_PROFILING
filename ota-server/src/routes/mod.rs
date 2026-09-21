@@ -21,8 +21,14 @@ struct StatusResponse {
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let console_routes = Router::new()
         .route("/api/ota/status", get(status))
+        .route("/api/ota/console/ws", get(crate::console::stream))
+        .route("/api/ota/console/devices", get(crate::console::devices));
+    if state.config.console_only {
+        return console_routes.fallback(not_found).with_state(state);
+    }
+    console_routes
         .route(
             "/api/ota/projects",
             post(firmware::upload_project).get(firmware::list_projects),

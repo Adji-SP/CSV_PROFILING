@@ -2,6 +2,18 @@
 
 This project keeps the existing Flask/Pandas CSV profiler and adds a separate Rust/Axum OTA service for ESP32-S3 firmware.
 
+## Remote console and Azure-ready SQL
+
+The dashboard now includes a read-only **Remote Console**: ESP32 Rust application logs
+travel over MQTT/TLS to Axum and then over WebSocket to the browser. SQLite remains the
+local default; `DATABASE_URL` optionally selects PostgreSQL, including Azure Database
+for PostgreSQL. This is not a Microsoft SQL Server driver.
+
+See [setup, device configuration, security boundaries and Azure instructions](docs/remote-console-azure.md).
+Cloud resources and live MQTT credentials are not provisioned automatically. Sensor
+telemetry remains deferred. Set `OTA_CONSOLE_ONLY=true` for a hosted read-only service;
+never expose the trusted local firmware compiler publicly.
+
 ## Beginner handbook
 
 The illustrated LaTeX module in [`docs/book`](docs/book/README.md) teaches the whole project from first startup through CSV internals, the Axum build pipeline, initial ESP32-S3 flashing, function-based uploaded firmware, OTA deployment, rollback, troubleshooting, and safe extension points. Complete English and Bahasa Indonesia editions are generated alongside their LaTeX sources.
