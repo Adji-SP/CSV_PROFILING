@@ -1,4 +1,5 @@
 //! Shared data passed from the stable runtime to a function-based device application.
+pub mod tinyml;
 
 use std::sync::{Arc, RwLock};
 

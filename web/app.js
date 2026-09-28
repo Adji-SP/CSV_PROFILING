@@ -21,6 +21,8 @@ const analyseBtn    = document.getElementById("analyse-btn");
 const newAnalysisBtn= document.getElementById("new-analysis");
 const navProfiler   = document.getElementById("nav-profiler");
 const navRuns       = document.getElementById("nav-runs");
+const navCsvGroup   = document.getElementById("nav-csv-toggle");
+const navCsvSubmenu = document.getElementById("nav-csv-submenu");
 const navOta        = document.getElementById("nav-ota");
 const navDevices    = document.getElementById("nav-devices");
 const navBuilds     = document.getElementById("nav-builds");
@@ -294,6 +296,12 @@ navRuns?.addEventListener("click", (e) => {
   document.querySelector(".sessions-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
+navCsvGroup?.addEventListener("click", () => {
+  const expanded = navCsvGroup.getAttribute("aria-expanded") === "true";
+  navCsvGroup.setAttribute("aria-expanded", String(!expanded));
+  navCsvSubmenu.hidden = expanded;
+});
+
 navOta?.addEventListener("click", (e) => {
   e.preventDefault();
   showSection("ota-section", "ota");
@@ -314,7 +322,7 @@ navBuilds?.addEventListener("click", (e) => {
 
 // -- Section helpers -------------------------------------------
 function showSection(id, activeNav = null) {
-  ["upload-section","progress-section","report-section","ota-section","devices-section","builds-section","console-section"].forEach((sid) => {
+  ["upload-section","progress-section","report-section","ota-section","devices-section","builds-section","console-section","tinyml-section"].forEach((sid) => {
     document.getElementById(sid).classList.toggle("hidden", sid !== id);
   });
   newAnalysisBtn.style.display = id === "report-section" ? "inline-block" : "none";
@@ -326,6 +334,7 @@ function showSection(id, activeNav = null) {
     "devices-section":  { nav: "devices", title: "Devices" },
     "builds-section":   { nav: "builds", title: "Build History" },
     "console-section":  { nav: "console", title: "Remote Console" },
+    "tinyml-section":   { nav: "tinyml", title: "TinyML" },
   }[id];
   setActiveNav(sectionMeta?.nav || "profiler");
   if (breadcrumbCurrent && sectionMeta) breadcrumbCurrent.textContent = sectionMeta.title;
@@ -333,6 +342,8 @@ function showSection(id, activeNav = null) {
 }
 
 function setActiveNav(active) {
+  navCsvGroup?.classList.toggle("active-parent", active === "profiler" || active === "runs");
+  document.getElementById("nav-tinyml")?.classList.toggle("active", active === "tinyml");
   document.getElementById("nav-console")?.classList.toggle("active", active === "console");
   navProfiler?.classList.toggle("active", active === "profiler");
   navRuns?.classList.toggle("active", active === "runs");
@@ -340,6 +351,19 @@ function setActiveNav(active) {
   navDevices?.classList.toggle("active", active === "devices");
   navBuilds?.classList.toggle("active", active === "builds");
 }
+
+// Optional deep link for bookmarked dashboard views, e.g. ?view=console.
+window.addEventListener("load", () => {
+  const view = new URLSearchParams(window.location.search).get("view");
+  const route = {
+    ota: "nav-ota",
+    devices: "nav-devices",
+    builds: "nav-builds",
+    console: "nav-console",
+    tinyml: "nav-tinyml",
+  }[view];
+  if (route) document.getElementById(route)?.click();
+});
 
 function setProgress(pct, label) {
   const v = Math.max(0, Math.min(100, pct));

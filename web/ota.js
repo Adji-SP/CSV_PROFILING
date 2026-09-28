@@ -17,6 +17,10 @@ const buildsTbody = document.getElementById("builds-tbody");
 const deviceGrid = document.getElementById("device-grid");
 const devicesEmpty = document.getElementById("devices-empty");
 const serviceIndicator = document.getElementById("ota-service-indicator");
+const otaSummaryService = document.getElementById("ota-summary-service");
+const otaSummaryFirmware = document.getElementById("ota-summary-firmware");
+const otaSummaryDevices = document.getElementById("ota-summary-devices");
+const otaSummaryBuilds = document.getElementById("ota-summary-builds");
 
 let otaFirmware = [];
 let otaDevices = [];
@@ -86,11 +90,19 @@ async function checkOtaService() {
     serviceIndicator.className = "service-indicator online";
     serviceIndicator.innerHTML = '<span class="service-dot"></span> OTA online';
     serviceIndicator.title = `${status.service} ${status.version}\nFirmware URL: ${status.public_base_url}`;
+    if (otaSummaryService) {
+      otaSummaryService.textContent = "Online";
+      otaSummaryService.classList.remove("is-offline");
+    }
     return status;
   } catch (error) {
     serviceIndicator.className = "service-indicator offline";
     serviceIndicator.innerHTML = '<span class="service-dot"></span> OTA offline';
     serviceIndicator.title = error.message;
+    if (otaSummaryService) {
+      otaSummaryService.textContent = "Offline";
+      otaSummaryService.classList.add("is-offline");
+    }
     return null;
   }
 }
@@ -143,6 +155,7 @@ async function loadFirmware(showError = true) {
 }
 
 function renderFirmware() {
+  if (otaSummaryFirmware) otaSummaryFirmware.textContent = otaFirmware.filter(item => item.status === "ready").length;
   firmwareCount.textContent = `${otaFirmware.length} image${otaFirmware.length === 1 ? "" : "s"}`;
   if (!otaFirmware.length) {
     firmwareTbody.innerHTML = '<tr><td colspan="9" class="table-empty">No firmware images have been built yet.</td></tr>';
@@ -221,6 +234,7 @@ async function loadDevices(showError = true) {
 }
 
 function renderDevices() {
+  if (otaSummaryDevices) otaSummaryDevices.textContent = otaDevices.length;
   devicesEmpty.classList.toggle("hidden", otaDevices.length !== 0);
   if (!otaDevices.length) {
     deviceGrid.innerHTML = "";
@@ -267,6 +281,7 @@ async function loadBuildHistory(showError = true) {
 }
 
 function renderBuildHistory() {
+  if (otaSummaryBuilds) otaSummaryBuilds.textContent = otaBuilds.filter(build => ["queued", "building"].includes(build.status)).length;
   if (!otaBuilds.length) {
     buildsTbody.innerHTML = '<tr><td colspan="8" class="table-empty">No firmware builds yet.</td></tr>';
     return;
@@ -312,7 +327,7 @@ function pollBuild(buildId) {
         activeBuildPoll = setTimeout(poll, 1500);
       } else {
         otaBuildBtn.disabled = false;
-        otaBuildBtn.textContent = "Upload & Build";
+        otaBuildBtn.textContent = "Build firmware";
         await Promise.all([loadFirmware(false), loadBuildHistory(false)]);
         showToast(
           build.status === "success" ? "Firmware build completed." : "Firmware build failed. Compiler errors are in the build log.",
@@ -323,7 +338,7 @@ function pollBuild(buildId) {
     } catch (error) {
       otaBuildLog.textContent += `\nPolling error: ${error.message}`;
       otaBuildBtn.disabled = false;
-      otaBuildBtn.textContent = "Upload & Build";
+      otaBuildBtn.textContent = "Build firmware";
       setOtaBuildState("failed");
     }
   };
@@ -404,7 +419,7 @@ otaBuildBtn?.addEventListener("click", async () => {
     otaBuildLog.textContent += `\nUPLOAD / BUILD FAILED\n${error.message}`;
     setOtaBuildState("failed");
     otaBuildBtn.disabled = false;
-    otaBuildBtn.textContent = "Upload & Build";
+    otaBuildBtn.textContent = "Build firmware";
     showToast(error.message, "error", 8000);
   }
 });

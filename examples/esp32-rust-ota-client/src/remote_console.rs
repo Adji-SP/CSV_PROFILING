@@ -127,17 +127,35 @@ pub fn initialize() -> anyhow::Result<()> {
     }));
     log::set_logger(logger).map_err(|_| anyhow::anyhow!("Logger already installed"))?;
     log::set_max_level(log::LevelFilter::Info);
+    let telemetry = firmware_app_api::tinyml::install();
     std::thread::Builder::new()
         .name("remote-console".into())
         .stack_size(8192)
         .spawn(move || {
             let topic = format!("devices/{id}/logs");
+            let mut pending: Option<firmware_app_api::tinyml::Packet> = None;
             loop {
                 if !connected.load(Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
-                let Ok(entry) = receiver.recv_timeout(Duration::from_secs(1)) else {
+                // Telemetry and logs share this MQTT client. Never block the application thread.
+                for _ in 0..8 {
+                    if pending.is_none() {
+                        pending = telemetry.as_ref().and_then(|rx| rx.try_recv().ok());
+                    }
+                    let Some(packet) = pending.as_ref() else {
+                        break;
+                    };
+                    if mqtt
+                        .publish(&packet.topic, QoS::AtLeastOnce, false, &packet.payload)
+                        .is_err()
+                    {
+                        break;
+                    }
+                    pending = None;
+                }
+                let Ok(entry) = receiver.recv_timeout(Duration::from_millis(50)) else {
                     continue;
                 };
                 let lost = count.swap(0, Ordering::Relaxed);

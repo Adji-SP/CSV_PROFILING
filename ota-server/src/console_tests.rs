@@ -61,6 +61,10 @@ async fn console_auth_history_live_and_isolation() {
     ));
     let console = Console::for_test("a".repeat(64));
     let state = AppState {
+        tinyml: crate::tinyml::TinyMl::new(
+            &storage,
+            crate::tinyml::Settings::load().expect("settings"),
+        ),
         config,
         storage,
         coordinator,
@@ -70,6 +74,7 @@ async fn console_auth_history_live_and_isolation() {
         .await
         .expect("loopback listener");
     let address = listener.local_addr().expect("address");
+    let tinyml = state.tinyml.clone();
     let server = tokio::spawn(async move {
         axum::serve(listener, crate::routes::router(state))
             .await
@@ -156,5 +161,107 @@ async fn console_auth_history_live_and_isolation() {
     let mut response = String::new();
     http.read_to_string(&mut response).await.expect("read");
     assert!(response.starts_with("HTTP/1.1 404"));
+    async fn get(address: std::net::SocketAddr, path: &str, token: Option<&str>) -> String {
+        let mut stream = tokio::net::TcpStream::connect(address).await.expect("http");
+        let auth = token
+            .map(|v| format!("Authorization: Bearer {v}\r\n"))
+            .unwrap_or_default();
+        stream
+            .write_all(
+                format!(
+                    "GET {path} HTTP/1.1\r\nHost: localhost\r\n{auth}Connection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .await
+            .expect("response");
+        response
+    }
+    assert!(
+        get(address, "/api/tinyml/status", None)
+            .await
+            .starts_with("HTTP/1.1 401")
+    );
+    let viewer = "a".repeat(64);
+    assert!(
+        get(address, "/api/tinyml/status", Some(&viewer))
+            .await
+            .contains("connected_devices")
+    );
+    let mut ml_request = format!("ws://{address}/api/tinyml/ws")
+        .into_client_request()
+        .expect("request");
+    ml_request
+        .headers_mut()
+        .insert("origin", "http://localhost:5000".parse().expect("origin"));
+    let (mut ml, _) = connect_async(ml_request).await.expect("tinyml socket");
+    ml.send(Message::Text(
+        serde_json::json!({"token":viewer}).to_string().into(),
+    ))
+    .await
+    .expect("hello");
+    assert!(text(&mut ml).await.contains("tinyml.connected"));
+    tinyml.ingest("tinyml/v1/node/run/start",br#"{"schema_version":"1.0","message_id":"http-start","device_id":"node","run_id":"http-run","message_type":"run_start","timestamp":null,"data":{"mode":"evaluation"}}"#).await.expect("start");
+    assert!(text(&mut ml).await.contains("tinyml.run.started"));
+    console
+        .accept(
+            "devices/node/logs",
+            br#"{"device_id":"node","level":"INFO","message":"still separate"}"#,
+        )
+        .await;
+    assert!(text(&mut socket).await.contains("still separate"));
+    let runs = tinyml.repo.runs(&Default::default()).await.expect("runs");
+    let id = runs["items"][0]["id"].as_str().expect("id");
+    tinyml.ingest("tinyml/v1/node/run/http-run/result",br#"{"schema_version":"1.0","message_id":"http-result","device_id":"node","run_id":"http-run","message_type":"inference_result","timestamp":null,"data":{"sample_id":"=2+2","actual_class":"A","predicted_class":"A","confidence":0.9},"other":{"nested":{"flag":true}}}"#).await.expect("result");
+    assert!(
+        get(
+            address,
+            &format!("/api/tinyml/runs/{id}/results?page_size=201"),
+            Some(&viewer)
+        )
+        .await
+        .starts_with("HTTP/1.1 400")
+    );
+    assert!(
+        get(
+            address,
+            &format!("/api/tinyml/runs/{id}/results?correct=true"),
+            Some(&viewer)
+        )
+        .await
+        .contains("nested")
+    );
+    let csv = get(
+        address,
+        &format!("/api/tinyml/runs/{id}/results.csv"),
+        Some(&viewer),
+    )
+    .await;
+    assert!(csv.contains("text/csv"));
+    assert!(csv.contains("\"'=2+2\""));
+    assert!(
+        get(
+            address,
+            &format!("/api/tinyml/runs/{id}/report"),
+            Some(&viewer)
+        )
+        .await
+        .starts_with("HTTP/1.1 404")
+    );
+    tinyml.ingest("tinyml/v1/node/run/http-run/complete",br#"{"schema_version":"1.0","message_id":"http-end","device_id":"node","run_id":"http-run","message_type":"run_complete","timestamp":null,"data":{"status":"completed"}}"#).await.expect("complete");
+    tinyml.maintain().await.expect("report");
+    let report = get(
+        address,
+        &format!("/api/tinyml/runs/{id}/report/json"),
+        Some(&viewer),
+    )
+    .await;
+    assert!(report.contains("attachment; filename=\"tinyml-report.json\""));
+    assert!(report.contains("\"accuracy\":1.0"));
     server.abort();
 }

@@ -681,6 +681,9 @@ name = "firmware-app-api"
 version = "0.1.0"
 dependencies = [
  "esp-idf-svc",
+ "serde",
+ "serde_json",
+ "tinyml-protocol",
 ]
 
 [[package]]
@@ -1450,6 +1453,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.5",
+]
+
+[[package]]
+name = "tinyml-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

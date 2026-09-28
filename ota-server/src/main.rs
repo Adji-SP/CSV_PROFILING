@@ -8,6 +8,7 @@ mod routes;
 mod services;
 mod state;
 mod storage;
+mod tinyml;
 
 use std::sync::Arc;
 
@@ -49,13 +50,17 @@ async fn main() -> ApiResult<()> {
         config.build_dir.clone(),
     ));
     let console = console::Console::new();
-    console.start_mqtt().map_err(|_| {
+    let tinyml = tinyml::TinyMl::new(&storage, tinyml::Settings::load()?);
+    let (shutdown_sender, shutdown) = tokio::sync::watch::channel(false);
+    tinyml.start(shutdown.clone());
+    console.start_mqtt(tinyml.clone(), shutdown).map_err(|_| {
         ApiError::internal(
             "CONSOLE_CONFIG",
             "Invalid MQTT console configuration; check broker credentials and TLS files",
         )
     })?;
     let state = AppState {
+        tinyml,
         console,
         config: Arc::clone(&config),
         storage,
@@ -90,10 +95,16 @@ async fn main() -> ApiResult<()> {
         );
     }
 
-    axum::serve(listener, app).await.map_err(|error| {
-        ApiError::internal("SERVER_ERROR", "OTA server stopped unexpectedly")
-            .with_details(error.to_string())
-    })
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            let _ = shutdown_sender.send(true);
+        })
+        .await
+        .map_err(|error| {
+            ApiError::internal("SERVER_ERROR", "OTA server stopped unexpectedly")
+                .with_details(error.to_string())
+        })
 }
 
 fn cors_layer(config: &Config) -> ApiResult<CorsLayer> {

@@ -44,6 +44,12 @@ impl Storage {
             .connect(&database_url)
             .await?;
         let storage = Self { pool };
+        // Reports hold a read snapshot while telemetry continues writing.
+        if database_url.starts_with("sqlite:") {
+            sqlx::query("PRAGMA journal_mode=WAL")
+                .execute(&storage.pool)
+                .await?;
+        }
         storage.migrate().await?;
         Ok(storage)
     }
@@ -69,6 +75,21 @@ impl Storage {
                 sqlx::query(statement).execute(&mut *tx).await?;
             }
             sqlx::query("INSERT INTO schema_versions(version) VALUES (1)")
+                .execute(&mut *tx)
+                .await?;
+        }
+        let tinyml_applied: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM schema_versions WHERE version=2")
+                .fetch_one(&mut *tx)
+                .await?;
+        if tinyml_applied == 0 {
+            for statement in include_str!("../migrations/002_tinyml.sql")
+                .split(';')
+                .filter(|s| !s.trim().is_empty())
+            {
+                sqlx::query(statement).execute(&mut *tx).await?;
+            }
+            sqlx::query("INSERT INTO schema_versions(version) VALUES (2)")
                 .execute(&mut *tx)
                 .await?;
         }

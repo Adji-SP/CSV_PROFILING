@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="tinyml.css" />
 </head>
 <body>
 
@@ -17,13 +18,20 @@
       <span>Data &amp; Firmware</span>
     </div>
     <nav class="sidebar-nav">
-      <a href="#" class="nav-item active" id="nav-profiler">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        <span>CSV Profiler</span>
-      </a>
-      <a href="#" class="nav-item" id="nav-runs">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span>CSV Runs</span>
+      <div class="nav-group" id="nav-csv-group">
+        <button class="nav-group-toggle active-parent" id="nav-csv-toggle" type="button" aria-expanded="true" aria-controls="nav-csv-submenu">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          <span>CSV Workspace</span>
+          <svg class="nav-group-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="nav-submenu" id="nav-csv-submenu">
+          <a href="#" class="nav-subitem active" id="nav-profiler"><span class="nav-subitem-dot" aria-hidden="true"></span><span>Profiler</span></a>
+          <a href="#" class="nav-subitem" id="nav-runs"><span class="nav-subitem-dot" aria-hidden="true"></span><span>Run History</span></a>
+        </div>
+      </div>
+      <a href="#" class="nav-item" id="nav-tinyml">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"/><path d="M9 9h6v6H9z"/></svg>
+        <span>Reporting</span>
       </a>
       <a href="#" class="nav-item" id="nav-ota">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4H9z"/><path d="M7 7h10v5a5 5 0 0 1-10 0z"/><path d="M12 17v4"/><path d="M9 21h6"/></svg>
@@ -37,7 +45,10 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         <span>Build History</span>
       </a>
-      <a href="#" class="nav-item" id="nav-console"><span>Remote Console</span></a>
+      <a href="#" class="nav-item" id="nav-console">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        <span>Remote Console</span>
+      </a>
     </nav>
   </aside>
 
@@ -292,43 +303,56 @@
       <section id="ota-section" class="hidden">
         <div class="page-title page-title-row">
           <div>
+            <span class="page-kicker">Device operations</span>
             <h1>OTA Firmware</h1>
-            <p class="page-subtitle">Compose managed device applications or build standalone ESP-IDF projects.</p>
+            <p class="page-subtitle">Build, verify, and release managed ESP32-S3 firmware from one workspace.</p>
           </div>
-          <button class="btn-sm" id="ota-refresh">Refresh</button>
+          <button class="btn-sm btn-with-icon" id="ota-refresh"><span aria-hidden="true">&#8635;</span> Refresh data</button>
+        </div>
+
+        <div class="ota-summary" aria-label="OTA overview">
+          <div class="summary-item"><span class="summary-icon summary-icon-server" aria-hidden="true">S</span><div><span class="summary-label">OTA service</span><strong id="ota-summary-service">Checking</strong></div></div>
+          <div class="summary-item"><span class="summary-icon" aria-hidden="true">F</span><div><span class="summary-label">Ready firmware</span><strong id="ota-summary-firmware">0</strong></div></div>
+          <div class="summary-item"><span class="summary-icon" aria-hidden="true">D</span><div><span class="summary-label">Registered devices</span><strong id="ota-summary-devices">0</strong></div></div>
+          <div class="summary-item"><span class="summary-icon" aria-hidden="true">B</span><div><span class="summary-label">Active builds</span><strong id="ota-summary-builds">0</strong></div></div>
         </div>
 
         <div class="ota-grid">
-          <div class="card">
-            <div class="card-header">Firmware Project</div>
-            <div class="card-body">
+          <div class="card ota-build-card">
+            <div class="section-card-heading">
+              <div><h2>Build firmware</h2></div>
+              <span id="ota-build-state" class="status-badge status-idle">Idle</span>
+            </div>
+            <div class="card-body ota-build-form">
               <label class="form-field">
-                <span>Managed application or standalone Rust project (.zip)</span>
-                <input id="ota-project-input" class="file-input" type="file" accept=".zip,application/zip" />
+                <span>Project (.zip)</span>
+                <span class="ota-upload-control">
+                  <span class="ota-upload-mark" aria-hidden="true">ZIP</span>
+                  <input id="ota-project-input" class="file-input" type="file" accept=".zip,application/zip" />
+                </span>
               </label>
               <div class="ota-form-row">
                 <label class="form-field">
-                  <span>Target board</span>
+                  <span>Target</span>
                   <select id="ota-target" class="pg-input">
                     <option value="esp32s3">ESP32-S3</option>
                   </select>
                 </label>
                 <label class="form-field">
-                  <span>Firmware version</span>
+                  <span>Version</span>
                   <input id="ota-version" class="pg-input" placeholder="1.0.1" autocomplete="off" />
                 </label>
               </div>
               <div class="ota-action-row">
-                <button id="ota-build-btn" class="btn-primary">Upload &amp; Build</button>
-                <span id="ota-build-state" class="status-badge status-idle">Idle</span>
+                <button id="ota-build-btn" class="btn-primary ota-build-submit">Build firmware</button>
               </div>
-              <!-- <p class="field-help">Managed ZIPs use <code>src/main.rs</code> with plain <code>setup</code> and <code>main</code> functions. The server attaches them to the stable Wi-Fi/OTA runtime. Other Cargo projects use legacy standalone mode. Builds execute project <code>build.rs</code> and dependency code; upload trusted projects only.</p> -->
             </div>
           </div>
 
           <div class="card build-log-card">
-            <div class="card-header sessions-header">
-              <span>Build Log</span>
+            <div class="terminal-heading">
+              <div><span class="terminal-dot terminal-dot-red"></span><span class="terminal-dot terminal-dot-amber"></span><span class="terminal-dot terminal-dot-green"></span></div>
+              <span>Compiler output</span>
               <span id="ota-build-id" class="session-id-chip">No active build</span>
             </div>
             <pre id="ota-build-log" class="build-terminal" aria-live="polite">Waiting for a firmware build...</pre>
@@ -336,8 +360,8 @@
         </div>
 
         <div class="card ota-table-card">
-          <div class="card-header sessions-header">
-            <span>Firmware Library</span>
+          <div class="section-card-heading compact">
+            <div><h2>Firmware library</h2></div>
             <span id="firmware-count" class="muted-count">0 images</span>
           </div>
           <div class="table-scroll">
@@ -353,13 +377,17 @@
       <section id="devices-section" class="hidden">
         <div class="page-title page-title-row">
           <div>
+            <span class="page-kicker">Fleet</span>
             <h1>ESP32 Devices</h1>
             <p class="page-subtitle">Registered devices, desired firmware, and live OTA progress.</p>
           </div>
-          <button class="btn-sm" id="devices-refresh">Refresh</button>
+          <button class="btn-sm btn-with-icon" id="devices-refresh"><span aria-hidden="true">&#8635;</span> Refresh devices</button>
         </div>
         <div id="devices-empty" class="card empty-state hidden">
-          No devices are registered yet. Devices appear here after <code>POST /api/ota/devices/register</code>.
+          <span class="empty-state-icon" aria-hidden="true">D</span>
+          <h2>No registered devices</h2>
+          <p>Flash the managed OTA firmware first. After it connects to Wi-Fi, it registers itself with this server.</p>
+          <code>POST /api/ota/devices/register</code>
         </div>
         <div id="device-grid" class="device-grid"></div>
       </section>
@@ -368,10 +396,11 @@
       <section id="builds-section" class="hidden">
         <div class="page-title page-title-row">
           <div>
+            <span class="page-kicker">Compiler activity</span>
             <h1>Build History</h1>
             <p class="page-subtitle">Every queued, successful, and failed firmware build with full compiler logs.</p>
           </div>
-          <button class="btn-sm" id="builds-refresh">Refresh</button>
+          <button class="btn-sm btn-with-icon" id="builds-refresh"><span aria-hidden="true">&#8635;</span> Refresh builds</button>
         </div>
         <div class="card">
           <div class="table-scroll">
@@ -384,20 +413,101 @@
       </section>
 
       <section id="console-section" class="hidden">
-        <div class="page-title"><h1>Remote Console</h1><p>Live application logs over Wi-Fi. Recent history is temporary.</p></div>
-        <div class="card" style="padding:20px">
-          <label>Device <select id="console-device"></select></label>
-          <button class="btn-sm" id="console-refresh">Refresh devices</button>
-          <label>Console access token <input id="console-token" type="password" autocomplete="off"></label>
-          <button class="btn-sm" id="console-connect">Connect</button>
-          <button class="btn-sm" id="console-disconnect">Disconnect</button>
-          <p id="console-status" role="status">Disconnected</p>
-          <label>Level <select id="console-level"><option>ALL</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option><option>TRACE</option></select></label>
-          <label>Filter <input id="console-filter" type="search"></label>
-          <label><input id="console-scroll" type="checkbox" checked> Auto-scroll</label>
-          <button class="btn-sm" id="console-pause">Pause</button>
-          <button class="btn-sm" id="console-download">Download logs</button>
-          <pre id="console-output" style="height:55vh;overflow:auto;white-space:pre-wrap;background:#101820;color:#dbe7ee;padding:16px" aria-label="Device log output"></pre>
+        <div class="page-title page-title-row">
+          <div><span class="page-kicker">Diagnostics</span><h1>Remote Console</h1><p class="page-subtitle">Watch Rust application logs from a registered device over MQTT.</p></div>
+          <span id="console-connection-badge" class="status-badge status-idle">Disconnected</span>
+        </div>
+        <div class="console-layout">
+          <aside class="card console-connect-card">
+            <div class="section-card-heading compact"><div><h2>Connection</h2></div></div>
+            <div class="card-body">
+              <label class="form-field"><span>Access token</span><input id="console-token" class="pg-input" type="password" autocomplete="off" placeholder="Paste token"></label>
+              <div class="console-device-row">
+                <label class="form-field"><span>Device</span><select id="console-device" class="pg-input" disabled><option value="">Loading devices</option></select></label>
+                <button class="btn-sm btn-with-icon" id="console-refresh"><span aria-hidden="true">&#8635;</span> Refresh</button>
+              </div>
+              <div class="console-connect-actions">
+                <button class="btn-primary" id="console-connect" disabled>Connect</button>
+                <button class="btn-sm" id="console-disconnect" disabled>Disconnect</button>
+              </div>
+              <div id="console-status" class="console-status" role="status"><span class="console-status-dot"></span><span>Loading devices...</span></div>
+            </div>
+          </aside>
+          <div class="card console-output-card">
+            <div class="console-toolbar">
+              <div class="console-toolbar-group">
+                <label class="console-control"><span>Level</span><select id="console-level"><option>ALL</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option><option>TRACE</option></select></label>
+                <label class="console-control console-filter-control"><span>Filter</span><input id="console-filter" type="search" placeholder="Search log messages"></label>
+              </div>
+              <div class="console-toolbar-actions">
+                <label class="console-check"><input id="console-scroll" type="checkbox" checked> Auto-scroll</label>
+                <button class="btn-sm" id="console-pause">Pause</button>
+                <button class="btn-sm" id="console-download" disabled>Download</button>
+              </div>
+            </div>
+            <div class="console-screen">
+              <div id="console-empty" class="console-empty"><span>&gt;_</span><strong>No live session</strong><p>Connect to a registered device to begin receiving application logs.</p></div>
+              <pre id="console-output" aria-label="Device log output"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="tinyml-section" class="hidden">
+        <div class="tml-page-head">
+          <div>
+            <span class="page-kicker">Edge intelligence</span>
+            <h1>TinyML Monitor</h1>
+            <p>Inspect inference runs, model quality, and device performance.</p>
+          </div>
+          <span id="tml-connection" class="tml-connection is-offline" role="status"><span class="tml-connection-dot"></span>Disconnected</span>
+        </div>
+        <div class="card tml-connect-card">
+          <div class="tml-connect-copy">
+            <span class="tml-icon-box" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+            <div><h2>Connect to your workspace</h2><p>Use the same viewer token as Remote Console.</p></div>
+          </div>
+          <form id="tml-connect-form" class="tml-connect-form">
+            <label for="tml-token">Viewer token</label>
+            <div class="tml-connect-controls">
+              <input id="tml-token" type="password" class="pg-input" autocomplete="off" required placeholder="Paste viewer token">
+              <button class="btn-primary" type="submit">Connect</button>
+              <button id="tml-disconnect" class="btn-sm" type="button" disabled>Disconnect</button>
+            </div>
+            <span id="tml-message" role="status">Not connected</span>
+          </form>
+        </div>
+        <div id="tml-overview" class="tml-stats"></div>
+        <div class="card tml-panel">
+          <div class="tml-heading tml-runs-head">
+            <div><span class="tml-eyebrow">History</span><h2>Inference runs</h2></div>
+            <form id="tml-run-filter" class="tml-toolbar"><label>Device<select id="tml-device" class="pg-input" disabled><option value="">All devices</option></select></label><label>Status<select id="tml-run-status" class="pg-input" disabled><option value="">All states</option><option>created</option><option>running</option><option>completing</option><option>completed</option><option>failed</option><option>cancelled</option><option>timed_out</option></select></label><button class="btn-sm" disabled><span aria-hidden="true">&#8635;</span> Refresh</button></form>
+          </div>
+          <div class="table-scroll"><table class="sessions-table ota-table"><thead><tr><th>Run</th><th>Device</th><th>Model</th><th>Mode</th><th>Started</th><th>Duration</th><th>Samples</th><th>Accuracy</th><th>Mean ms</th><th>Status</th></tr></thead><tbody id="tml-runs"><tr><td colspan="10">No runs loaded.</td></tr></tbody></table></div>
+          <div id="tml-empty" class="tml-empty">
+            <span class="tml-empty-icon" aria-hidden="true"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19V9m5 10V5m6 14v-7m5 7V3"/><path d="M2 19h20"/></svg></span>
+            <strong>Connect to view inference runs</strong>
+            <p>Your device experiments and saved reports will appear here.</p>
+            <button id="tml-empty-connect" class="btn-sm" type="button">Enter viewer token</button>
+          </div>
+          <div class="tml-pagination hidden" id="tml-runs-pagination"><button class="btn-sm" id="tml-runs-prev">Previous</button><span id="tml-runs-page">Page 1</span><button class="btn-sm" id="tml-runs-next">Next</button></div>
+        </div>
+        <div id="tml-detail" class="hidden">
+          <div class="tml-heading"><div><h2 id="tml-run-name">Run</h2><p id="tml-run-meta"></p></div><div class="tml-toolbar"><button class="btn-sm" id="tml-metrics-refresh">Refresh metrics</button><button class="btn-sm" id="tml-export-json">Report JSON</button><button class="btn-sm" id="tml-export-csv">Results CSV</button></div></div>
+          <div id="tml-live-stats" class="tml-stats"></div>
+          <div class="card tml-panel"><div class="tml-heading"><h3>Live signals</h3><label>Plot <select id="tml-signal" class="pg-input"></select></label></div><p class="field-help">Latest 200 received results. Missing measurements are omitted.</p><div id="tml-chart" class="tml-chart" role="img" aria-label="Selected measurement over received samples"></div></div>
+          <div class="card tml-panel"><h3>Results</h3>
+            <form id="tml-result-filter" class="tml-toolbar tml-filters">
+              <label>Search<input id="tml-search" class="pg-input" type="search" placeholder="Sample or custom data"></label>
+              <label>Actual<input id="tml-actual" class="pg-input" placeholder="Any"></label><label>Predicted<input id="tml-predicted" class="pg-input" placeholder="Any"></label>
+              <label>Outcome<select id="tml-correct" class="pg-input"><option value="">All</option><option value="true">Correct</option><option value="false">Incorrect</option></select></label>
+              <label>Confidence from<input id="tml-min" class="pg-input" type="number" min="0" max="1" step="0.01" placeholder="0"></label><label>to<input id="tml-max" class="pg-input" type="number" min="0" max="1" step="0.01" placeholder="1"></label>
+              <label>Sort<select id="tml-sort" class="pg-input"><option value="time">Received time</option><option value="sequence">Sequence</option><option value="confidence">Confidence</option><option value="inference">Inference</option><option value="sample">Sample</option></select></label><label>Order<select id="tml-order" class="pg-input"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label><button class="btn-sm">Apply</button>
+            </form>
+            <div class="table-scroll"><table class="sessions-table ota-table"><thead><tr><th>Sample</th><th>Received</th><th>Actual</th><th>Predicted</th><th>Confidence</th><th>Correct</th><th>Infer ms</th><th>Pipeline ms</th><th>Chip °C</th><th>Heap bytes</th><th>Details</th></tr></thead><tbody id="tml-results"></tbody></table></div>
+            <div class="tml-pagination"><button class="btn-sm" id="tml-results-prev">Previous</button><span id="tml-results-page">Page 1</span><button class="btn-sm" id="tml-results-next">Next</button></div>
+          </div>
+          <div class="card tml-panel"><div class="tml-heading"><h3>Report</h3><span id="tml-report-state">Waiting for a run.</span></div><div id="tml-report"></div></div>
+          <details class="card tml-panel"><summary>Events &amp; snapshots</summary><div id="tml-observations"></div></details>
         </div>
       </section>
     </main>
@@ -408,7 +518,7 @@
     <div class="confirm-dialog ota-dialog">
       <div class="dialog-title-row">
         <h2>Firmware Details</h2>
-        <button class="btn-ghost-sm" id="ota-detail-close">✕</button>
+        <button class="btn-ghost-sm" id="ota-detail-close" aria-label="Close firmware details">✕</button>
       </div>
       <div id="ota-detail-body" class="detail-list"></div>
     </div>
@@ -419,7 +529,7 @@
     <div class="confirm-dialog deploy-dialog">
       <div class="dialog-title-row">
         <h2>Deploy OTA</h2>
-        <button class="btn-ghost-sm" id="deploy-close">✕</button>
+        <button class="btn-ghost-sm" id="deploy-close" aria-label="Close deployment dialog">✕</button>
       </div>
       <label class="form-field"><span>Device</span><select id="deploy-device" class="pg-input"></select></label>
       <label class="form-field"><span>Firmware</span><select id="deploy-firmware" class="pg-input"></select></label>
@@ -448,5 +558,6 @@
   <script src="app.js"></script>
   <script src="ota.js"></script>
   <script src="console.js"></script>
+  <script src="tinyml.js"></script>
 </body>
 </html>

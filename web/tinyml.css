@@ -1,0 +1,66 @@
+/* TinyML workspace — scoped to preserve the CSV and OTA views. */
+#tinyml-section { max-width: 1440px; margin: 0 auto; }
+#tinyml-section .tml-page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; margin:4px 0 20px; }
+#tinyml-section .page-kicker,#tinyml-section .tml-eyebrow { display:block; margin-bottom:4px; color:#6366f1; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+#tinyml-section .tml-page-head h1 { color:#111827; font-size:22px; font-weight:650; line-height:1.25; }
+#tinyml-section .tml-page-head p { margin-top:4px; color:#6b7280; font-size:13px; }
+#tinyml-section .tml-connection { display:inline-flex; align-items:center; gap:7px; min-height:28px; padding:4px 10px; border:1px solid #e5e7eb; border-radius:999px; background:#fff; color:#6b7280; font-size:11.5px; font-weight:600; }
+#tinyml-section .tml-connection-dot { width:7px; height:7px; border-radius:50%; background:#9ca3af; }
+#tinyml-section .tml-connection.is-live { border-color:#a7f3d0; background:#ecfdf5; color:#047857; }
+#tinyml-section .tml-connection.is-live .tml-connection-dot { background:#10b981; }
+#tinyml-section .tml-connection.is-pending .tml-connection-dot { background:#f59e0b; }
+#tinyml-section .tml-connect-card { display:grid; grid-template-columns:minmax(260px,.85fr) minmax(420px,1.35fr); align-items:center; gap:30px; padding:20px 22px; margin-bottom:16px; overflow:visible; }
+#tinyml-section .tml-connect-copy { display:flex; align-items:center; gap:13px; }
+#tinyml-section .tml-icon-box,#tinyml-section .tml-empty-icon { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:42px; height:42px; border-radius:9px; background:#eef2ff; color:#4f46e5; }
+#tinyml-section .tml-connect-copy h2 { color:#111827; font-size:14px; font-weight:600; }
+#tinyml-section .tml-connect-copy p { margin-top:2px; color:#6b7280; font-size:12px; }
+#tinyml-section .tml-connect-form { min-width:0; }
+#tinyml-section .tml-connect-form>label,#tinyml-section .tml-toolbar label,#tinyml-section .tml-heading>label { display:flex; flex-direction:column; gap:5px; color:#6b7280; font-size:10.5px; font-weight:600; text-transform:uppercase; }
+#tinyml-section .tml-connect-controls { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; gap:8px; margin-top:5px; }
+#tinyml-section .tml-connect-controls .pg-input { width:100%; min-width:0; }
+#tinyml-section .tml-connect-controls button { align-self:stretch; white-space:nowrap; }
+#tinyml-section #tml-message { display:block; min-height:18px; margin-top:6px; color:#6b7280; font-size:11.5px; overflow-wrap:anywhere; }
+#tinyml-section .tml-stats { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:16px 0; }
+#tinyml-section .tml-stats:empty { display:none; }
+#tinyml-section .tml-stat { position:relative; min-width:0; padding:15px 16px; overflow:hidden; }
+#tinyml-section .tml-stat::before { position:absolute; top:0; left:0; width:3px; height:100%; background:#6366f1; content:""; }
+#tinyml-section .tml-stat span { display:block; margin-bottom:6px; overflow:hidden; color:#6b7280; font-size:10.5px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+#tinyml-section .tml-stat strong { display:block; overflow:hidden; color:#111827; font-size:19px; font-variant-numeric:tabular-nums; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
+#tinyml-section .tml-panel { padding:0; margin:16px 0; }
+#tinyml-section .tml-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:17px 20px; border-bottom:1px solid #edf0f4; }
+#tinyml-section .tml-heading h2,#tinyml-section .tml-heading h3 { color:#111827; font-size:15px; font-weight:600; line-height:1.25; }
+#tinyml-section h4 { margin:18px 0 9px; font-size:13px; }
+#tinyml-section small { display:block; margin-top:3px; color:#9ca3af; }
+#tinyml-section .tml-toolbar { display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px; padding:0; }
+#tinyml-section .tml-toolbar .pg-input { min-width:118px; }
+#tinyml-section .tml-runs-head .tml-toolbar { margin-left:auto; }
+#tinyml-section .table-scroll { scrollbar-color:#cbd5e1 transparent; scrollbar-width:thin; }
+#tinyml-section .sessions-table { font-variant-numeric:tabular-nums; }
+#tinyml-section .sessions-table th { white-space:nowrap; }
+#tinyml-section .sessions-table td { height:48px; }
+#tinyml-section .sessions-table tbody tr { cursor:default; }
+#tinyml-section .sessions-table .btn-ghost-sm { padding:0; color:#4f46e5; font-size:12.5px; font-weight:600; text-align:left; }
+#tinyml-section .sessions-table .btn-ghost-sm:hover { background:transparent; color:#3730a3; text-decoration:underline; text-underline-offset:2px; }
+#tinyml-section .tml-empty { display:flex; align-items:center; flex-direction:column; justify-content:center; min-height:250px; padding:40px 20px; text-align:center; }
+#tinyml-section .tml-empty.is-compact { min-height:170px; }
+#tinyml-section .tml-empty-icon { width:48px; height:48px; margin-bottom:13px; }
+#tinyml-section .tml-empty strong { color:#1f2937; font-size:13px; font-weight:600; }
+#tinyml-section .tml-empty p { margin:4px 0 15px; color:#9ca3af; font-size:12px; }
+#tinyml-section .tml-pagination { display:flex; align-items:center; justify-content:flex-end; gap:11px; padding:12px 16px; border-top:1px solid #edf0f4; color:#6b7280; font-size:11.5px; font-variant-numeric:tabular-nums; }
+#tinyml-section .tml-filters { padding:14px 20px; border-bottom:1px solid #edf0f4; background:#fafbfc; }
+#tinyml-section .tml-filters input { max-width:145px; }
+#tinyml-section .field-help { padding:0 20px; margin:12px 0; color:#9ca3af; font-size:11.5px; }
+#tinyml-section .tml-chart { min-height:220px; padding:2px 20px 18px; color:#9ca3af; }
+#tinyml-section .tml-chart svg { width:100%; max-height:280px; fill:#6b7280; font-size:11px; }
+#tinyml-section #tml-report { padding:0 20px 20px; }
+#tinyml-section #tml-report-state { color:#6b7280; font-size:11.5px; }
+#tinyml-section #tml-observations { padding:0 20px 20px; }
+#tinyml-section .tml-json { max-width:100%; margin:10px 0; }
+#tinyml-section summary { padding:8px 0; color:#374151; font-size:12px; font-weight:500; cursor:pointer; }
+#tinyml-section pre { min-width:180px; max-height:360px; padding:12px; overflow:auto; border:1px solid #e5e7eb; border-radius:5px; background:#f9fafb; color:#374151; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:11.5px; overflow-wrap:anywhere; white-space:pre-wrap; }
+#tinyml-section .tml-metrics th { max-width:400px; text-align:left; white-space:normal; }
+#tinyml-section li { margin:7px 0 7px 18px; }
+#tinyml-section button:disabled,#tinyml-section select:disabled { cursor:not-allowed; opacity:.55; }
+@media(max-width:1100px) { #tinyml-section .tml-stats { grid-template-columns:repeat(3,minmax(0,1fr)); } #tinyml-section .tml-connect-card { grid-template-columns:1fr; gap:16px; } }
+@media(max-width:760px) { #tinyml-section .tml-page-head { align-items:flex-start; flex-direction:column; gap:12px; } #tinyml-section .tml-connect-card { padding:17px; } #tinyml-section .tml-connect-controls { grid-template-columns:1fr 1fr; } #tinyml-section .tml-connect-controls .pg-input { grid-column:1/-1; } #tinyml-section .tml-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } #tinyml-section .tml-heading { align-items:stretch; flex-direction:column; padding:15px; } #tinyml-section .tml-runs-head .tml-toolbar { margin-left:0; } #tinyml-section .tml-toolbar label { flex:1 1 130px; } #tinyml-section .tml-toolbar .pg-input { width:100%; max-width:none; } #tinyml-section .tml-pagination { justify-content:center; } }
+@media(max-width:430px) { #tinyml-section .tml-connect-controls { grid-template-columns:1fr; } #tinyml-section .tml-connect-controls .pg-input { grid-column:auto; } #tinyml-section .tml-stats { grid-template-columns:1fr; } }

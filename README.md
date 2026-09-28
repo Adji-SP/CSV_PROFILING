@@ -247,6 +247,19 @@ See [`examples/esp32-rust-ota-client/README.md`](examples/esp32-rust-ota-client/
 
 An OTA-ready device needs `otadata` and at least `ota_0` / `ota_1`. Flash the partition table and rollback-capable bootloader during initial provisioning; OTA downloads update only the inactive application slot.
 
+## TinyML monitoring
+
+The **TinyML** page tracks MQTT inference runs separately from CSV reports and
+console logs. It provides live results, custom-field charts, classification and
+embedded-performance reports, and JSON/CSV downloads. Use the same console
+viewer token; registered devices publish with their own MQTT credentials.
+
+Start with [the TinyML guide](docs/TINYML_GUIDE.md), including protocol examples,
+Azure/PostgreSQL setup, metric definitions, and troubleshooting. A function-based
+firmware example is in [uploaded-tinyml-demo](examples/uploaded-tinyml-demo/README.md).
+No trained model or sensor is assumed. Existing firmware must be rebuilt with
+the updated runtime before it can publish TinyML telemetry.
+
 ## Security boundary
 
 ZIP extension, upload size, extracted size, path components, dependency paths,

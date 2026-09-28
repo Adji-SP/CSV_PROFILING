@@ -98,7 +98,11 @@ impl Console {
         let _ = self.events.send(entry);
     }
 
-    pub fn start_mqtt(self: &Arc<Self>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn start_mqtt(
+        self: &Arc<Self>,
+        tinyml: Arc<crate::tinyml::TinyMl>,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let Ok(host) = std::env::var("MQTT_HOST") else {
             return Ok(());
         };
@@ -114,7 +118,12 @@ impl Console {
             port,
         );
         options.set_keep_alive(Duration::from_secs(30));
-        options.set_max_packet_size(8192, 8192);
+        options.set_max_packet_size(
+            tinyml.settings.max_bytes + 1024,
+            tinyml.settings.max_bytes + 1024,
+        );
+        options.set_manual_acks(true);
+        options.set_clean_session(false);
         options.set_credentials(
             std::env::var("MQTT_USERNAME")?,
             std::env::var("MQTT_PASSWORD").unwrap_or_default(),
@@ -148,21 +157,84 @@ impl Console {
             ),
         }
         let (client, mut events) = AsyncClient::new(options, 32);
-        let console = self.clone();
+        let (ingestion_sender, mut ingestion_receiver) =
+            tokio::sync::mpsc::channel::<rumqttc::Publish>(64);
+        let ingestion_client = client.clone();
+        let ingestion_service = tinyml.clone();
+        let mut worker_shutdown = shutdown.clone();
         tokio::spawn(async move {
             loop {
-                match events.poll().await {
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        if client
-                            .subscribe("devices/+/logs", QoS::AtMostOnce)
-                            .await
-                            .is_err()
-                        {
+                let message = tokio::select! {_=worker_shutdown.changed()=>break,message=ingestion_receiver.recv()=>match message {Some(m)=>m,None=>break}};
+                // QoS 1 acknowledgment happens after the atomic database commit.
+                loop {
+                    match ingestion_service
+                        .ingest(&message.topic, &message.payload)
+                        .await
+                    {
+                        Ok(_) => break,
+                        Err(error) if error.status.is_server_error() => {
+                            tracing::error!(
+                                code = error.code,
+                                "TinyML storage unavailable; retrying before MQTT acknowledgment"
+                            );
+                            tokio::select! {_=worker_shutdown.changed()=>return,_=tokio::time::sleep(Duration::from_secs(2))=>{}}
+                        }
+                        Err(error) => {
+                            tracing::warn!(code=error.code,reason=%error.message,"TinyML message rejected");
                             break;
                         }
                     }
+                }
+                if ingestion_client.ack(&message).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let console = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let next = tokio::select! {
+                    _=shutdown.changed()=>{let _=client.try_disconnect();break;},
+                    next=events.poll()=>next,
+                };
+                match next {
+                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                        if client.try_subscribe("devices/+/logs", QoS::AtMostOnce).is_err() {
+                            events.clean();continue;
+                        }
+                        if tinyml.settings.enabled
+                            && client
+                                .try_subscribe(
+                                    format!("{}/#", tinyml.settings.prefix),
+                                    QoS::AtLeastOnce,
+                                )
+                                .is_err()
+                        {
+                            events.clean();continue;
+                        }
+                    }
                     Ok(Event::Incoming(Incoming::Publish(p))) if !p.retain => {
-                        console.accept(&p.topic, &p.payload).await
+                        if tinyml.settings.enabled
+                            && p.topic.starts_with(&format!("{}/", tinyml.settings.prefix))
+                        {
+                            match ingestion_sender.try_send(p) {
+                                Ok(())=>{},
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_))=>break,
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(_))=>{
+                                    // Never block the MQTT poller behind the ACK request queue.
+                                    // Close without ACK; the persistent broker session redelivers.
+                                    tracing::warn!("TinyML ingestion backpressure; reconnecting for QoS 1 redelivery");
+                                    events.clean();
+                                    tokio::select!{_=shutdown.changed()=>break,_=tokio::time::sleep(Duration::from_secs(1))=>{}}
+                                }
+                            }
+                        } else {
+                            console.accept(&p.topic, &p.payload).await;
+                            if client.try_ack(&p).is_err(){events.clean();}
+                        }
+                    }
+                    Ok(Event::Incoming(Incoming::Publish(p))) => {
+                        if client.try_ack(&p).is_err(){events.clean();}
                     }
                     Ok(_) => {}
                     Err(_) => {
@@ -182,7 +254,7 @@ struct Hello {
     device_id: String,
 }
 
-fn authorized(console: &Console, token: &str) -> bool {
+pub(crate) fn authorized(console: &Console, token: &str) -> bool {
     use sha2::{Digest, Sha256};
     if console.token.len() < 32 {
         return false;

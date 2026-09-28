@@ -1,6 +1,7 @@
 pub mod builds;
 pub mod devices;
 pub mod firmware;
+pub mod tinyml;
 
 use axum::{
     Json, Router,
@@ -22,6 +23,7 @@ struct StatusResponse {
 
 pub fn router(state: AppState) -> Router {
     let console_routes = Router::new()
+        .merge(tinyml::router(state.clone()))
         .route("/api/ota/status", get(status))
         .route("/api/ota/console/ws", get(crate::console::stream))
         .route("/api/ota/console/devices", get(crate::console::devices));
