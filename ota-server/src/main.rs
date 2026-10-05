@@ -33,7 +33,7 @@ async fn main() -> ApiResult<()> {
         .init();
 
     let config = Arc::new(Config::load()?);
-    let storage = Storage::connect(&config.database_url()).await?;
+    let storage = Storage::connect(&config.database_url()?).await?;
     let builder = Arc::new(LocalFirmwareBuilder::new(
         config.build_dir.clone(),
         config.runtime_template_dir.clone(),
@@ -53,11 +53,12 @@ async fn main() -> ApiResult<()> {
     let tinyml = tinyml::TinyMl::new(&storage, tinyml::Settings::load()?);
     let (shutdown_sender, shutdown) = tokio::sync::watch::channel(false);
     tinyml.start(shutdown.clone());
-    console.start_mqtt(tinyml.clone(), shutdown).map_err(|_| {
+    console.start_mqtt(tinyml.clone(), shutdown).map_err(|error| {
         ApiError::internal(
             "CONSOLE_CONFIG",
             "Invalid MQTT console configuration; check broker credentials and TLS files",
         )
+        .with_details(error.to_string())
     })?;
     let state = AppState {
         tinyml,
@@ -70,7 +71,7 @@ async fn main() -> ApiResult<()> {
     let cors = cors_layer(&config)?;
     let upload_limit = config.max_upload_bytes.saturating_add(1024 * 1024);
     let app = Router::new()
-        .merge(routes::router(state))
+        .merge(routes::router(state.clone()))
         .layer(DefaultBodyLimit::max(upload_limit))
         .layer(cors)
         .layer(TraceLayer::new_for_http());
@@ -84,6 +85,18 @@ async fn main() -> ApiResult<()> {
                 format!("Could not bind OTA server to {address}: {error}"),
             )
         })?;
+
+    // Do not mutate build records until this process owns the API listener.
+    // A second launch that fails to bind must not interrupt a live build.
+    if !config.console_only {
+        let interrupted = state.storage.reconcile_interrupted_builds().await?;
+        if interrupted > 0 {
+            tracing::warn!(
+                interrupted,
+                "Marked interrupted OTA builds as failed; they can be retried"
+            );
+        }
+    }
 
     println!("OTA Server running");
     println!("Local:\nhttp://localhost:{}", config.port);

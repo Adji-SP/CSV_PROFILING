@@ -13,6 +13,9 @@ pub struct Storage {
     pool: AnyPool,
 }
 
+const UNCONFIRMED_BOOT_ERROR: &str =
+    "Device returned with a different version after OTA reboot; possible rollback or USB recovery";
+
 impl Storage {
     pub async fn connect(database_url: &str) -> ApiResult<Self> {
         let database_url = if database_url.starts_with("sqlite:") {
@@ -149,6 +152,76 @@ impl Storage {
         Ok(())
     }
 
+    /// Reserve one build for a project in a single transaction. Updating the
+    /// project row first serializes competing requests on both SQLite and
+    /// PostgreSQL; checking for an active build also covers older records that
+    /// were created before the project status was kept in sync.
+    pub async fn reserve_build(&self, project_id: &str, build_id: &str) -> ApiResult<Project> {
+        let mut tx = self.pool.begin().await?;
+        let claimed = sqlx::query(
+            r#"UPDATE projects SET status='queued' WHERE id=$1
+            AND status NOT IN ('queued','building')
+            AND NOT EXISTS (SELECT 1 FROM builds WHERE project_id=$1
+                AND status IN ('queued','building'))"#,
+        )
+        .bind(project_id)
+        .execute(&mut *tx)
+        .await?;
+        if claimed.rows_affected() == 0 {
+            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id=$1")
+                .bind(project_id)
+                .fetch_one(&mut *tx)
+                .await?;
+            return Err(if exists == 0 {
+                ApiError::not_found("Firmware project not found")
+            } else {
+                ApiError::conflict(
+                    "BUILD_ALREADY_RUNNING",
+                    "This project already has a queued or active build",
+                )
+            });
+        }
+        sqlx::query(
+            "INSERT INTO builds (id,project_id,status,logs_text,created_at) VALUES ($1,$2,'queued',$3,$4)",
+        )
+        .bind(build_id)
+        .bind(project_id)
+        .bind("Build queued\n")
+        .bind(now())
+        .execute(&mut *tx)
+        .await?;
+        let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id=$1")
+            .bind(project_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(project)
+    }
+
+    /// Called once by the full OTA server at startup. Build processes cannot
+    /// survive as managed jobs across server restarts, so previous in-flight
+    /// records must become retryable failures instead of blocking new builds.
+    pub async fn reconcile_interrupted_builds(&self) -> ApiResult<u64> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"UPDATE projects SET status='failed' WHERE id IN
+            (SELECT project_id FROM builds WHERE status IN ('queued','building'))"#,
+        )
+        .execute(&mut *tx)
+        .await?;
+        let result = sqlx::query(
+            r#"UPDATE builds SET status='failed',finished_at=$1,
+            error='Build interrupted by OTA server restart',
+            logs_text=logs_text || $2 WHERE status IN ('queued','building')"#,
+        )
+        .bind(now())
+        .bind("BUILD FAILED: Build interrupted by OTA server restart. Retry the build.\n")
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn get_build(&self, id: &str) -> ApiResult<Build> {
         let query = r#"SELECT b.id,b.project_id,p.name AS project_name,p.target,p.version,
             b.status,b.logs_text,b.exit_code,b.error,b.started_at,b.finished_at,b.created_at
@@ -228,7 +301,7 @@ impl Storage {
     }
 
     pub async fn get_firmware(&self, id: &str) -> ApiResult<Firmware> {
-        sqlx::query_as::<_, Firmware>("SELECT * FROM firmware WHERE id=$1")
+        sqlx::query_as::<_, Firmware>("SELECT * FROM firmware WHERE id=$1 AND status='ready'")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?
@@ -237,7 +310,7 @@ impl Storage {
 
     pub async fn list_firmware(&self) -> ApiResult<Vec<Firmware>> {
         Ok(
-            sqlx::query_as::<_, Firmware>("SELECT * FROM firmware ORDER BY created_at DESC")
+            sqlx::query_as::<_, Firmware>("SELECT * FROM firmware WHERE status<>'deleted' ORDER BY created_at DESC")
                 .fetch_all(&self.pool)
                 .await?,
         )
@@ -253,22 +326,54 @@ impl Storage {
         .ok_or_else(|| ApiError::not_found("No ready firmware exists for this target"))
     }
 
-    pub async fn firmware_reference_count(&self, id: &str) -> ApiResult<i64> {
-        let device_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM devices WHERE desired_firmware_id=$1")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?;
-        let deployment_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM deployments WHERE firmware_id=$1")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?;
-        Ok(device_count + deployment_count)
+    /// Reserve deletion before touching the file. A tombstone keeps deployment
+    /// history intact and makes interrupted filesystem cleanup safe to retry.
+    pub async fn begin_firmware_deletion(&self, id: &str) -> ApiResult<Firmware> {
+        let mut tx = self.pool.begin().await?;
+        let reserved = sqlx::query(
+            "UPDATE firmware SET status='deleting' WHERE id=$1 AND status IN ('ready','deleting')",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        if reserved.rows_affected() == 0 {
+            return Err(ApiError::not_found("Firmware not found"));
+        }
+        let firmware = sqlx::query_as::<_, Firmware>("SELECT * FROM firmware WHERE id=$1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+        // Until devices report image hashes, matching chip + version is the
+        // conservative way to protect their currently running recovery image.
+        let devices: Vec<String> = sqlx::query_scalar(
+            "SELECT device_id FROM devices WHERE desired_firmware_id=$1 OR (chip=$2 AND current_version=$3)",
+        )
+        .bind(id)
+        .bind(&firmware.target)
+        .bind(&firmware.version)
+        .fetch_all(&mut *tx)
+        .await?;
+        let active: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM deployments WHERE firmware_id=$1 AND status IN ('pending','downloading','verifying','installing','rebooting')",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !devices.is_empty() || active > 0 {
+            return Err(ApiError::conflict(
+                "FIRMWARE_IN_USE",
+                format!(
+                    "Firmware is queued or currently running on a device ({}). Cancel the queued update or deploy another version first. Past deployments do not block deletion.",
+                    if devices.is_empty() { "active deployment".to_owned() } else { devices.join(", ") }
+                ),
+            ));
+        }
+        tx.commit().await?;
+        Ok(firmware)
     }
 
-    pub async fn delete_firmware(&self, id: &str) -> ApiResult<()> {
-        sqlx::query("DELETE FROM firmware WHERE id=$1")
+    pub async fn finish_firmware_deletion(&self, id: &str) -> ApiResult<()> {
+        sqlx::query("UPDATE firmware SET status='deleted' WHERE id=$1 AND status='deleting'")
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -296,6 +401,8 @@ impl Storage {
             .bind(current_version)
             .bind(now())
             .execute(&self.pool)
+            .await?;
+        self.reconcile_booted_deployment(device_id, current_version)
             .await?;
         self.get_device(device_id).await
     }
@@ -337,7 +444,80 @@ impl Storage {
         if result.rows_affected() == 0 {
             return Err(ApiError::not_found("Device not found; register it first"));
         }
+        self.reconcile_booted_deployment(device_id, current_version)
+            .await?;
         self.get_device(device_id).await
+    }
+
+    /// A successful boot can be reported by registration/heartbeat before the
+    /// separate OTA-success callback is sent. Reconcile only the queued version.
+    async fn reconcile_booted_deployment(
+        &self,
+        device_id: &str,
+        current_version: &str,
+    ) -> ApiResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let queued: Option<(Option<String>, Option<String>, String)> = sqlx::query_as(
+            "SELECT desired_version,desired_firmware_id,ota_status FROM devices WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((Some(version), Some(firmware_id), ota_status)) = queued {
+            if version == current_version {
+                let changed = sqlx::query(
+                    r#"UPDATE devices SET desired_version=NULL,desired_firmware_id=NULL,
+                    ota_status='success',ota_progress=100,ota_error=NULL
+                    WHERE device_id=$1 AND desired_version=$2 AND desired_firmware_id=$3"#,
+                )
+                .bind(device_id)
+                .bind(&version)
+                .bind(&firmware_id)
+                .execute(&mut *tx)
+                .await?;
+                if changed.rows_affected() == 1 {
+                    sqlx::query(
+                        r#"UPDATE deployments SET status='success',progress=100,error=NULL,updated_at=$1
+                        WHERE id=(SELECT id FROM deployments WHERE device_id=$2 AND firmware_id=$3
+                        ORDER BY created_at DESC LIMIT 1)"#,
+                    )
+                    .bind(now())
+                    .bind(device_id)
+                    .bind(&firmware_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            } else if ota_status == "rebooting" {
+                // The requested image never reported a healthy boot. Avoid
+                // reinstalling it forever when the previous slot returns.
+                let changed = sqlx::query(
+                    r#"UPDATE devices SET desired_version=NULL,desired_firmware_id=NULL,
+                    ota_status='failed',ota_progress=0,ota_error=$1
+                    WHERE device_id=$2 AND desired_version=$3 AND desired_firmware_id=$4"#,
+                )
+                .bind(UNCONFIRMED_BOOT_ERROR)
+                .bind(device_id)
+                .bind(&version)
+                .bind(&firmware_id)
+                .execute(&mut *tx)
+                .await?;
+                if changed.rows_affected() == 1 {
+                    sqlx::query(
+                        r#"UPDATE deployments SET status='failed',progress=0,error=$1,updated_at=$2
+                        WHERE id=(SELECT id FROM deployments WHERE device_id=$3 AND firmware_id=$4
+                        ORDER BY created_at DESC LIMIT 1)"#,
+                    )
+                    .bind(UNCONFIRMED_BOOT_ERROR)
+                    .bind(now())
+                    .bind(device_id)
+                    .bind(&firmware_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn create_deployment(
@@ -347,6 +527,23 @@ impl Storage {
         firmware: &Firmware,
     ) -> ApiResult<()> {
         let mut tx = self.pool.begin().await?;
+        // Serialize against deletion, including a deploy handler that fetched
+        // the ready image just before another request reserved its deletion.
+        let available = sqlx::query("UPDATE firmware SET status=status WHERE id=$1 AND status='ready'")
+            .bind(&firmware.id)
+            .execute(&mut *tx)
+            .await?;
+        if available.rows_affected() == 0 {
+            return Err(ApiError::conflict("FIRMWARE_NOT_READY", "Firmware is being deleted or is no longer available"));
+        }
+        sqlx::query(
+            r#"UPDATE deployments SET status='superseded',updated_at=$1
+            WHERE device_id=$2 AND status IN ('pending','downloading','verifying','installing','rebooting')"#,
+        )
+        .bind(now())
+        .bind(device_id)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             r#"INSERT INTO deployments
             (id,device_id,firmware_id,status,progress,created_at,updated_at)
@@ -372,6 +569,40 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn cancel_update(&self, device_id: &str) -> ApiResult<Device> {
+        let mut tx = self.pool.begin().await?;
+        let desired_firmware_id: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT desired_firmware_id FROM devices WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(desired_firmware_id) = desired_firmware_id else {
+            return Err(ApiError::not_found("Device not found"));
+        };
+        if let Some(firmware_id) = desired_firmware_id {
+            sqlx::query(
+                r#"UPDATE deployments SET status='cancelled',updated_at=$1
+                WHERE id=(SELECT id FROM deployments WHERE device_id=$2 AND firmware_id=$3
+                ORDER BY created_at DESC LIMIT 1)"#,
+            )
+            .bind(now())
+            .bind(device_id)
+            .bind(&firmware_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"UPDATE devices SET desired_version=NULL,desired_firmware_id=NULL,
+                ota_status='idle',ota_progress=0,ota_error=NULL WHERE device_id=$1"#,
+            )
+            .bind(device_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.get_device(device_id).await
+    }
+
     pub async fn update_ota_status(
         &self,
         device_id: &str,
@@ -381,21 +612,41 @@ impl Storage {
         error: Option<&str>,
     ) -> ApiResult<Device> {
         let mut tx = self.pool.begin().await?;
-        let desired_version: Option<String> =
-            sqlx::query_scalar("SELECT desired_version FROM devices WHERE device_id=$1")
-                .bind(device_id)
-                .fetch_optional(&mut *tx)
-                .await?
-                .flatten();
-
-        let resolved_version = current_version.or(desired_version.as_deref());
+        let desired: Option<(Option<String>, Option<String>, String, String)> = sqlx::query_as(
+            "SELECT desired_version,desired_firmware_id,current_version,ota_status FROM devices WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((desired_version, desired_firmware_id, stored_version, stored_ota_status)) = desired else {
+            return Err(ApiError::not_found("Device not found"));
+        };
+        if status == "success" {
+            if let Some(version) = desired_version.as_deref() {
+                if current_version != Some(version) {
+                    return Err(ApiError::conflict(
+                        "OTA_VERSION_MISMATCH",
+                        "The reported booted version does not match the queued firmware",
+                    ));
+                }
+            } else if current_version != Some(stored_version.as_str())
+                || stored_ota_status == "failed"
+            {
+                // A success callback may follow registration, which already
+                // reconciled the deployment. It may not invent a new version.
+                return Err(ApiError::conflict(
+                    "NO_MATCHING_DEPLOYMENT",
+                    "No queued deployment or registered boot matches this version",
+                ));
+            }
+        }
         if status == "success" {
             sqlx::query(
                 r#"UPDATE devices SET ota_status='success',ota_progress=100,
                 ota_error=NULL,current_version=COALESCE($1,current_version),
                 desired_version=NULL,desired_firmware_id=NULL,last_seen=$2 WHERE device_id=$3"#,
             )
-            .bind(resolved_version)
+            .bind(current_version)
             .bind(now())
             .bind(device_id)
             .execute(&mut *tx)
@@ -415,15 +666,19 @@ impl Storage {
             .await?;
         }
 
-        sqlx::query(r#"UPDATE deployments SET status=$1,progress=$2,error=$3,updated_at=$4
-            WHERE id=(SELECT id FROM deployments WHERE device_id=$5 ORDER BY created_at DESC LIMIT 1)"#)
-            .bind(status)
-            .bind(progress)
-            .bind(error)
-            .bind(now())
-            .bind(device_id)
-            .execute(&mut *tx)
-            .await?;
+        if let Some(firmware_id) = desired_firmware_id {
+            sqlx::query(r#"UPDATE deployments SET status=$1,progress=$2,error=$3,updated_at=$4
+                WHERE id=(SELECT id FROM deployments WHERE device_id=$5 AND firmware_id=$6
+                ORDER BY created_at DESC LIMIT 1)"#)
+                .bind(status)
+                .bind(progress)
+                .bind(error)
+                .bind(now())
+                .bind(device_id)
+                .bind(firmware_id)
+                .execute(&mut *tx)
+                .await?;
+        }
         tx.commit().await?;
         self.get_device(device_id).await
     }
@@ -511,13 +766,7 @@ mod tests {
             .create_deployment(&uuid::Uuid::new_v4().to_string(), &id, &firmware)
             .await
             .expect("deploy");
-        assert!(
-            storage
-                .firmware_reference_count(&firmware.id)
-                .await
-                .expect("references")
-                > 0
-        );
+        assert_eq!(storage.begin_firmware_deletion(&firmware.id).await.expect_err("queued image is protected").code, "FIRMWARE_IN_USE");
         storage
             .update_ota_status(&id, "downloading", 34, None, None)
             .await
@@ -543,10 +792,10 @@ mod tests {
             .execute(storage.pool())
             .await
             .expect("cleanup");
-        storage
-            .delete_firmware(&firmware.id)
-            .await
-            .expect("cleanup firmware");
+        storage.begin_firmware_deletion(&firmware.id).await.expect("reserve deletion");
+        storage.finish_firmware_deletion(&firmware.id).await.expect("delete firmware");
+        // Physical removal is only for cleaning this disposable test database.
+        sqlx::query("DELETE FROM firmware WHERE id=$1").bind(&firmware.id).execute(storage.pool()).await.expect("cleanup firmware");
         sqlx::query("DELETE FROM builds WHERE id=$1")
             .bind(build_id)
             .execute(storage.pool())
@@ -566,6 +815,252 @@ mod tests {
             dir.path().join("test.db").display()
         ))
         .await;
+    }
+
+    #[tokio::test]
+    async fn sqlite_build_reservation_is_atomic_per_project() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let storage = Storage::connect(&format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("builds.db").display()
+        ))
+        .await
+        .expect("temporary database");
+        let project = Project {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "concurrent".into(),
+            target: "esp32s3".into(),
+            version: "3.0.3".into(),
+            path: "test-project".into(),
+            status: "uploaded".into(),
+            created_at: now(),
+        };
+        storage.insert_project(&project).await.expect("project");
+
+        let mut requests = Vec::new();
+        for _ in 0..12 {
+            let storage = storage.clone();
+            let project_id = project.id.clone();
+            requests.push(tokio::spawn(async move {
+                storage
+                    .reserve_build(&project_id, &uuid::Uuid::new_v4().to_string())
+                    .await
+            }));
+        }
+        let mut accepted = 0;
+        for request in requests {
+            match request.await.expect("request task") {
+                Ok(_) => accepted += 1,
+                Err(error) => assert_eq!(error.code, "BUILD_ALREADY_RUNNING"),
+            }
+        }
+        assert_eq!(accepted, 1);
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM builds WHERE project_id=$1")
+            .bind(&project.id)
+            .fetch_one(storage.pool())
+            .await
+            .expect("build count");
+        assert_eq!(count, 1);
+        assert_eq!(storage.get_project(&project.id).await.expect("project").status, "queued");
+    }
+
+    #[tokio::test]
+    async fn sqlite_interrupted_builds_fail_once_and_can_be_retried() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let storage = Storage::connect(&format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("restart.db").display()
+        ))
+        .await
+        .expect("temporary database");
+        let project = Project {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "interrupted".into(),
+            target: "esp32s3".into(),
+            version: "3.0.3".into(),
+            path: "test-project".into(),
+            status: "uploaded".into(),
+            created_at: now(),
+        };
+        storage.insert_project(&project).await.expect("project");
+        let first = uuid::Uuid::new_v4().to_string();
+        storage.reserve_build(&project.id, &first).await.expect("reserve");
+        storage.start_build(&first).await.expect("start");
+        storage.set_project_status(&project.id, "building").await.expect("project status");
+
+        assert_eq!(storage.reconcile_interrupted_builds().await.expect("reconcile"), 1);
+        let interrupted = storage.get_build(&first).await.expect("build");
+        assert_eq!(interrupted.status, "failed");
+        assert!(interrupted.logs_text.contains("interrupted by OTA server restart"));
+        assert!(interrupted.finished_at.is_some());
+        assert_eq!(storage.get_project(&project.id).await.expect("project").status, "failed");
+        assert_eq!(storage.reconcile_interrupted_builds().await.expect("idempotent"), 0);
+
+        let retry = uuid::Uuid::new_v4().to_string();
+        storage.reserve_build(&project.id, &retry).await.expect("retry");
+        assert_eq!(storage.get_build(&retry).await.expect("retry build").status, "queued");
+    }
+
+    #[tokio::test]
+    async fn sqlite_cancel_and_reconcile_deployments() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let storage = Storage::connect(&format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("deployments.db").display()
+        ))
+        .await
+        .expect("database");
+        let device_id = "esp32-test";
+        storage
+            .upsert_device(device_id, "Test", "esp32s3", "1.0.0", "127.0.0.1")
+            .await
+            .expect("register");
+        let project_id = uuid::Uuid::new_v4().to_string();
+        storage
+            .insert_project(&Project {
+                id: project_id.clone(),
+                name: "test".into(),
+                target: "esp32s3".into(),
+                version: "1.1.0".into(),
+                path: "test".into(),
+                status: "uploaded".into(),
+                created_at: now(),
+            })
+            .await
+            .expect("project");
+        let build_id = uuid::Uuid::new_v4().to_string();
+        storage
+            .insert_build(&build_id, &project_id, "success")
+            .await
+            .expect("build");
+        let firmware = Firmware {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id,
+            build_id,
+            project: "test".into(),
+            target: "esp32s3".into(),
+            version: "1.1.0".into(),
+            filename: "firmware-test.bin".into(),
+            path: "firmware-test.bin".into(),
+            file_size: 4096,
+            sha256: "a".repeat(64),
+            status: "ready".into(),
+            created_at: now(),
+        };
+        storage.insert_firmware(&firmware).await.expect("firmware");
+
+        let first = uuid::Uuid::new_v4().to_string();
+        storage
+            .create_deployment(&first, device_id, &firmware)
+            .await
+            .expect("first deployment");
+        let second = uuid::Uuid::new_v4().to_string();
+        storage
+            .create_deployment(&second, device_id, &firmware)
+            .await
+            .expect("replacement deployment");
+        let first_status: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id=$1")
+            .bind(&first)
+            .fetch_one(storage.pool())
+            .await
+            .expect("superseded deployment");
+        assert_eq!(first_status, "superseded");
+
+        let cancelled = storage.cancel_update(device_id).await.expect("cancel update");
+        assert!(cancelled.desired_firmware_id.is_none());
+        assert_eq!(cancelled.ota_status, "idle");
+        let second_status: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id=$1")
+            .bind(&second)
+            .fetch_one(storage.pool())
+            .await
+            .expect("cancelled deployment");
+        assert_eq!(second_status, "cancelled");
+        storage.cancel_update(device_id).await.expect("idempotent cancel");
+        let error = storage
+            .update_ota_status(device_id, "success", 100, Some("9.9.9"), None)
+            .await
+            .expect_err("a callback cannot invent a version without a deployment");
+        assert_eq!(error.code, "NO_MATCHING_DEPLOYMENT");
+
+        let third = uuid::Uuid::new_v4().to_string();
+        storage
+            .create_deployment(&third, device_id, &firmware)
+            .await
+            .expect("new deployment");
+        let error = storage
+            .update_ota_status(device_id, "success", 100, Some("9.9.9"), None)
+            .await
+            .expect_err("incorrect boot version must not complete deployment");
+        assert_eq!(error.code, "OTA_VERSION_MISMATCH");
+        storage
+            .upsert_device(device_id, "Test", "esp32s3", "1.1.0", "127.0.0.1")
+            .await
+            .expect("new image registered after reboot");
+        let device = storage.get_device(device_id).await.expect("device");
+        assert!(device.desired_firmware_id.is_none());
+        assert_eq!(device.current_version, "1.1.0");
+        assert_eq!(device.ota_status, "success");
+        assert_eq!(device.ota_progress, 100);
+        storage
+            .update_ota_status(device_id, "success", 100, Some("1.1.0"), None)
+            .await
+            .expect("success callback after registration is idempotent");
+        let third_status: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id=$1")
+            .bind(&third)
+            .fetch_one(storage.pool())
+            .await
+            .expect("completed deployment");
+        assert_eq!(third_status, "success");
+        assert_eq!(storage.begin_firmware_deletion(&firmware.id).await.expect_err("running image protected").code, "FIRMWARE_IN_USE");
+        assert_eq!(storage.get_firmware(&firmware.id).await.expect("failed reservation rolls back").status, "ready");
+
+        // A later rollback/recovery boot into the old image must not cause an
+        // image that already reached the reboot stage to be offered forever.
+        storage
+            .heartbeat_device(device_id, "1.0.0", "online", "127.0.0.1")
+            .await
+            .expect("old image booted");
+        let fourth = uuid::Uuid::new_v4().to_string();
+        storage
+            .create_deployment(&fourth, device_id, &firmware)
+            .await
+            .expect("deployment before failed boot");
+        storage
+            .update_ota_status(device_id, "rebooting", 100, None, None)
+            .await
+            .expect("device rebooting");
+        storage
+            .upsert_device(device_id, "Test", "esp32s3", "1.0.0", "127.0.0.1")
+            .await
+            .expect("previous version re-registered");
+        let recovered = storage.get_device(device_id).await.expect("recovered device");
+        assert!(recovered.desired_firmware_id.is_none());
+        assert_eq!(recovered.ota_status, "failed");
+        assert!(recovered.ota_error.is_some());
+        let fourth_status: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id=$1")
+            .bind(&fourth)
+            .fetch_one(storage.pool())
+            .await
+            .expect("failed deployment");
+        assert_eq!(fourth_status, "failed");
+        let error = storage
+            .update_ota_status(device_id, "success", 100, Some("1.0.0"), None)
+            .await
+            .expect_err("an old image must not erase the failed rollback result");
+        assert_eq!(error.code, "NO_MATCHING_DEPLOYMENT");
+        // Cancelled, superseded, successful and failed historical attempts no
+        // longer prevent deletion once the device runs another version.
+        storage.begin_firmware_deletion(&firmware.id).await.expect("only history remains");
+        assert!(storage.get_firmware(&firmware.id).await.is_err());
+        assert_eq!(storage.list_firmware().await.expect("list pending cleanup")[0].status, "deleting");
+        let stale_deploy = storage.create_deployment(&uuid::Uuid::new_v4().to_string(), device_id, &firmware).await.expect_err("stale handler cannot deploy a deleting file");
+        assert_eq!(stale_deploy.code, "FIRMWARE_NOT_READY");
+        storage.begin_firmware_deletion(&firmware.id).await.expect("interrupted cleanup can be retried");
+        storage.finish_firmware_deletion(&firmware.id).await.expect("finish deletion");
+        assert!(storage.list_firmware().await.expect("list").is_empty());
+        assert!(storage.latest_firmware("esp32s3").await.is_err());
+        let history: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM deployments WHERE firmware_id=$1").bind(&firmware.id).fetch_one(storage.pool()).await.expect("history");
+        assert_eq!(history, 4);
     }
     #[tokio::test]
     #[ignore = "Requires disposable PostgreSQL via TEST_DATABASE_URL"]

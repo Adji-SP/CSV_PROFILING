@@ -25,7 +25,8 @@ param(
     [string] $Port,
     [string] $TargetDir,
     [string] $ToolsDir,
-    [string] $PythonPath
+    [string] $PythonPath,
+    [string] $EnvFile = (Join-Path $PSScriptRoot '.env')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +45,16 @@ function Invoke-Tool {
 
 try {
     if ($env:OS -ne 'Windows_NT') { throw 'This helper is for Windows PowerShell.' }
+    . (Join-Path $PSScriptRoot 'scripts\env-file.ps1')
+    Import-FirmwareEnvironment -Path $EnvFile -Root $PSScriptRoot
+    if (-not $WifiSsid) { $WifiSsid = $env:WIFI_SSID }
+    if (-not $ServerUrl) { $ServerUrl = $env:OTA_SERVER_URL }
+    if (-not $ServerUrl) { $ServerUrl = $env:OTA_PUBLIC_BASE_URL }
+    if (-not $PSBoundParameters.ContainsKey('DeviceName') -and $env:DEVICE_NAME) { $DeviceName = $env:DEVICE_NAME }
+    if (-not $PSBoundParameters.ContainsKey('Version') -and $env:FIRMWARE_VERSION) { $Version = $env:FIRMWARE_VERSION }
+    if (-not $TargetDir) { $TargetDir = $env:OTA_CARGO_TARGET_DIR }
+    if (-not $ToolsDir) { $ToolsDir = $env:OTA_ESP_IDF_TOOLS_DIR }
+    if (-not $PythonPath) { $PythonPath = $env:OTA_PYTHON_PATH }
     Push-Location -LiteralPath $projectDir
     $locationPushed = $true
 
@@ -107,7 +118,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($WifiSsid) -or [Text.Encoding]::UTF8.GetByteCount($WifiSsid) -gt 32) {
         throw 'Wi-Fi name must contain 1-32 UTF-8 bytes.'
     }
-    if (-not $ServerUrl) { $ServerUrl = Read-Host 'OTA server LAN URL (for example http://192.168.1.5:7000)' }
+    if (-not $ServerUrl) { $ServerUrl = Read-Host 'OTA server LAN or public HTTPS URL' }
     $server = $null
     if (-not [Uri]::TryCreate($ServerUrl, [UriKind]::Absolute, [ref] $server) -or
         $server.Scheme -notin @('http', 'https') -or $server.IsLoopback -or
@@ -115,15 +126,31 @@ try {
         $server.Query -or $server.Fragment -or $server.AbsolutePath -ne '/') {
         throw 'Use the PC LAN base URL, with no credentials, path, query, or fragment; not localhost or 0.0.0.0.'
     }
-    if (-not $WifiPassword) { $WifiPassword = Read-Host 'Wi-Fi password' -AsSecureString }
-    $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($WifiPassword)
-    try { $env:WIFI_PASS = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer) }
-    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+    if (-not $WifiPassword -and -not $env:WIFI_PASS) { $WifiPassword = Read-Host 'Wi-Fi password' -AsSecureString }
+    if ($WifiPassword) {
+        $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($WifiPassword)
+        try { $env:WIFI_PASS = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer) }
+        finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+    }
     if ([Text.Encoding]::UTF8.GetByteCount([string] $env:WIFI_PASS) -gt 64) { throw 'Wi-Fi password exceeds 64 bytes.' }
     $env:WIFI_SSID = $WifiSsid
     $env:OTA_SERVER_URL = $ServerUrl.TrimEnd('/')
     $env:DEVICE_NAME = $DeviceName
     $env:FIRMWARE_VERSION = $Version
+    if ($env:DEVICE_MQTT_URL) {
+        $mqttUri = $null
+        if (-not [Uri]::TryCreate($env:DEVICE_MQTT_URL, [UriKind]::Absolute, [ref] $mqttUri) -or
+            $mqttUri.Scheme -ne 'mqtts' -or $mqttUri.IsLoopback -or $mqttUri.UserInfo -or
+            $mqttUri.Query -or $mqttUri.Fragment -or $mqttUri.AbsolutePath -ne '/') {
+            throw 'DEVICE_MQTT_URL must be mqtts://broker-host:8883 with no embedded credentials; never localhost on an ESP32.'
+        }
+        if (-not $env:DEVICE_ID -or -not $env:DEVICE_MQTT_USERNAME) {
+            throw 'DEVICE_ID and DEVICE_MQTT_USERNAME are required when MQTT is enabled.'
+        }
+        Write-Host 'MQTT configuration loaded for firmware. Credentials will not be printed.'
+    } else { Write-Host 'MQTT is not configured: this image will use USB-only logs.' }
+    Write-Host "Firmware Wi-Fi SSID: $WifiSsid"
+    Write-Host "Firmware OTA URL: $($env:OTA_SERVER_URL)"
 
     Write-Host 'Building firmware. Compiler errors will remain visible.'
     Invoke-Tool cargo @('+esp', 'build', '--release', '--target', 'xtensa-esp32s3-espidf', '--locked')

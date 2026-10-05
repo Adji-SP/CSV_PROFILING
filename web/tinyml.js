@@ -1,7 +1,8 @@
-/* TinyML owns its state and authenticated Rust API; CSV requests are untouched. */
+/* Reporting uses the shared viewer session; CSV requests are untouched. */
 (() => {
   "use strict";
   const el = id => document.getElementById(`tml-${id}`);
+  const access = window.viewerAccess;
   const esc = value => String(value ?? "—").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const numeric = value => typeof value === "number" && Number.isFinite(value);
   const fmt = (value, digits = 2) => numeric(value) ? value.toLocaleString(undefined, {maximumFractionDigits: digits}) : "—";
@@ -9,17 +10,23 @@
   const time = value => value ? new Date(value).toLocaleString() : "—";
   const active = run => ["created", "running", "completing"].includes(run?.status);
   let token = "", socket, retry, timer, generation = 0, reconnectDelay = 1000;
+  let socketConnected = false, mqttEnabled = true, mqttConfigured = false, mqttConnected = false;
   let selected = null, runPage = 1, resultPage = 1, chartRows = [];
   let refreshing = false, refreshAgain = false, lastMetrics = 0, reportIsFinal = false;
   function message(text) { el("message").textContent = text; }
   function connectionState(text,state="offline") {
     el("connection").className=`tml-connection is-${state}`;
-    el("connection").innerHTML='<span class="tml-connection-dot"></span>'+esc(text);
+    el("connection").innerHTML='<span class="tml-connection-dot"></span>Feed: '+esc(text);
+  }
+  function feedState() {
+    if (!token) connectionState("Disconnected");
+    else if (!mqttEnabled) connectionState("Reporting disabled");
+    else if (!mqttConfigured) connectionState("Broker not configured");
+    else if (!mqttConnected) connectionState("Broker offline");
+    else if (!socketConnected) connectionState("Connecting", "pending");
+    else connectionState("Live", "live");
   }
   function connectedControls(enabled) {
-    el("token").disabled=enabled;
-    el("connect-form").querySelector('button[type="submit"]').disabled=enabled;
-    el("disconnect").disabled=!enabled;
     el("device").disabled=!enabled;
     el("run-status").disabled=!enabled;
     el("run-filter").querySelector("button").disabled=!enabled;
@@ -51,7 +58,11 @@
   }
   function jsonDetails(title, value) { return `<details class="tml-json"><summary>${esc(title)}</summary><pre>${esc(JSON.stringify(value, null, 2))}</pre></details>`; }
   async function overview() {
-    const {overview:o} = await request("/status");
+    const status = await request("/status"), o = status.overview;
+    mqttEnabled = status.mqtt_enabled;
+    mqttConfigured = status.mqtt_configured;
+    mqttConnected = status.mqtt_connected;
+    feedState();
     stats("overview", [["Devices online", fmt(o.connected_devices,0)],["Active runs", fmt(o.active_runs,0)],["Completed",fmt(o.completed_runs,0)],["Inferences",fmt(o.total_inferences,0)],["Labelled accuracy",pct(o.accuracy)],["Mean inference",`${fmt(o.mean_inference_ms)} ms`]]);
     const q = new URLSearchParams({page:runPage,page_size:20});
     if (el("device").value) q.set("device_id",el("device").value);
@@ -159,36 +170,51 @@
       if (session!==generation) return;
       try {
         const data=JSON.parse(event.data);
-        if (data.type==="tinyml.connected") {reconnectDelay=1000;connectionState("Live","live");message("Live updates connected");}
+        if (data.type==="tinyml.connected") {reconnectDelay=1000;socketConnected=true;feedState();message(mqttConnected ? "Live updates connected" : "Viewer stream connected; waiting for MQTT broker.");}
+        if (data.type==="tinyml.broker.status") {mqttConnected=!!data.connected;feedState();}
         if (data.type==="tinyml.report.ready" && data.run_id===selected) reportIsFinal=false;
         schedule();
       } catch {message("Invalid live update received.");}
     };
     ws.onclose=() => {
       if (session!==generation || !token) return;
-      connectionState("Reconnecting…","pending");retry=setTimeout(() => connectSocket(session),reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000);
+      socketConnected=false;feedState();retry=setTimeout(() => connectSocket(session),reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000);
     };
     ws.onerror=() => message("Live connection unavailable. Check the server and allowed origin.");
   }
-  function disconnect() {
+  function disconnectLocal() {
     generation++;clearTimeout(retry);clearTimeout(timer);timer=null;token="";socket?.close();socket=null;
+    socketConnected=false;mqttConnected=false;
     selected=null;el("detail").classList.add("hidden");
     connectionState("Disconnected");connectedControls(false);showRunsState(0,false);el("overview").innerHTML="";
-    message("Not connected");
+    message("Connect viewer access to see reports.");
   }
-  document.getElementById("nav-tinyml").addEventListener("click",event => {event.preventDefault();showSection("tinyml-section","tinyml");});
-  el("connect-form").addEventListener("submit",guarded(async () => {
-    disconnect();token=el("token").value.trim();connectionState("Connecting","pending");message("Checking access…");
+  document.getElementById("nav-tinyml").addEventListener("click",guarded(async () => {
+    showSection("tinyml-section","tinyml");
+    if (access.get() && !token) await connectWithToken(access.get());
+  }));
+  async function connectWithToken(value) {
+    const candidate = value.trim();
+    if (!candidate || candidate !== access.get()) return;
+    if (token === candidate && !el("device").disabled) return;
+    disconnectLocal();token=candidate;connectionState("Connecting","pending");message("Checking access…");
+    const session = generation;
     let devices;
     try {devices=await request("/devices");}
-    catch(error){token="";connectionState("Access denied");connectedControls(false);throw error;}
+    catch(error){if(session===generation){disconnectLocal();connectionState("Reports unavailable");}throw error;}
+    if(session!==generation || token!==candidate || access.get()!==candidate) return;
     el("device").innerHTML='<option value="">All devices</option>'+devices.map(d => `<option value="${esc(d.device_id)}">${esc(d.name || d.device_id)}</option>`).join("");
     connectedControls(true);message("Workspace loaded");await refresh();connectSocket(generation);
-  }));
-  el("disconnect").addEventListener("click",disconnect);
+  }
+  access.subscribe(() => {
+    const shared=access.get();
+    if(!shared) disconnectLocal();
+    else if(!token && !document.getElementById("tinyml-section").classList.contains("hidden"))
+      connectWithToken(shared).catch(error => message(error.message));
+  });
   el("empty-connect").addEventListener("click",guarded(async () => {
     if(token){await overview();return;}
-    el("token").focus();
+    document.getElementById("viewer-access-token").focus();
   }));
   el("run-filter").addEventListener("submit",guarded(async () => {runPage=1;await overview();}));
   el("result-filter").addEventListener("submit",guarded(async () => {resultPage=1;if(selected) await results(selected);}));
@@ -208,6 +234,6 @@
     const response=await request(`/runs/${selected}/${path}`,true),url=URL.createObjectURL(await response.blob()),a=document.createElement("a");
     a.href=url;a.download=`tinyml-${selected}.${type}`;a.click();setTimeout(() => URL.revokeObjectURL(url),1000);
   }));
-  window.addEventListener("pagehide",disconnect);
+  window.addEventListener("pagehide",disconnectLocal);
   connectedControls(false);showRunsState(0,false);
 })();

@@ -6,6 +6,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
@@ -315,6 +316,10 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
             .arg("--release")
             .arg("--target")
             .arg(spec.rust_target)
+            // The human diagnostics remain on stderr. JSON artifact messages
+            // identify the executable produced by this build, even when Cargo
+            // reuses cached dependencies in a shared target directory.
+            .arg("--message-format=json-render-diagnostics")
             .current_dir(&build_source)
             .env("CARGO_TARGET_DIR", target_dir)
             .env("FIRMWARE_VERSION", &request.version)
@@ -337,13 +342,14 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
             let _ = logs.send("Configured base Python added to the build PATH".to_owned());
         }
         self.apply_toolchain(&mut cargo);
-        let cargo_status = run_logged(cargo, logs.clone()).await?;
+        let (cargo_status, artifacts) =
+            run_logged(cargo, logs.clone(), Some(build_source.join("Cargo.toml"))).await?;
         if !cargo_status.success() {
             return Err(BuildFailure::command_failed("Cargo build", cargo_status));
         }
 
         let release_dir = target_dir.join(spec.rust_target).join("release");
-        let elf_path = locate_elf(&release_dir).await?;
+        let elf_path = select_elf(&release_dir, artifacts).await?;
         let _ = logs.send(format!("ELF: {}", elf_path.display()));
 
         let short_id = request.build_id.chars().take(8).collect::<String>();
@@ -370,7 +376,7 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
             .arg(&elf_path)
             .arg(&output_path)
             .current_dir(&build_source);
-        let image_status = run_logged(espflash, logs.clone()).await?;
+        let (image_status, _) = run_logged(espflash, logs.clone(), None).await?;
         if !image_status.success() {
             return Err(BuildFailure::command_failed(
                 "espflash save-image",
@@ -399,7 +405,8 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
 async fn run_logged(
     mut command: Command,
     logs: UnboundedSender<String>,
-) -> Result<ExitStatus, BuildFailure> {
+    cargo_manifest: Option<PathBuf>,
+) -> Result<(ExitStatus, Vec<PathBuf>), BuildFailure> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|error| BuildFailure {
         message: "Could not start build process".to_owned(),
@@ -416,26 +423,49 @@ async fn run_logged(
         .take()
         .ok_or_else(|| BuildFailure::new("Could not capture build stderr"))?;
 
-    let stdout_task = tokio::spawn(forward_lines(stdout, logs.clone()));
-    let stderr_task = tokio::spawn(forward_lines(stderr, logs));
+    let stdout_task = tokio::spawn(forward_lines(stdout, logs.clone(), cargo_manifest));
+    let stderr_task = tokio::spawn(forward_lines(stderr, logs, None));
     let status = child.wait().await.map_err(|error| BuildFailure {
         message: "Could not wait for build process".to_owned(),
         details: Some(error.to_string()),
         exit_code: None,
     })?;
-    let _ = stdout_task.await;
+    let artifacts = stdout_task.await.map_err(|error| BuildFailure {
+        message: "Could not finish reading Cargo build output".to_owned(),
+        details: Some(error.to_string()),
+        exit_code: status.code(),
+    })?;
     let _ = stderr_task.await;
-    Ok(status)
+    Ok((status, artifacts))
 }
 
-async fn forward_lines<R>(reader: R, logs: UnboundedSender<String>)
+async fn forward_lines<R>(
+    reader: R,
+    logs: UnboundedSender<String>,
+    cargo_manifest: Option<PathBuf>,
+) -> Vec<PathBuf>
 where
     R: AsyncRead + Unpin,
 {
+    let mut artifacts = Vec::new();
     let mut lines = BufReader::new(reader).lines();
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
+                if let Some(manifest) = cargo_manifest.as_deref() {
+                    if let Some(message) = parse_cargo_line(&line, manifest) {
+                        match message {
+                            CargoLine::Artifact(path) => artifacts.push(path),
+                            CargoLine::Diagnostic(rendered) => {
+                                for line in rendered.lines() {
+                                    let _ = logs.send(line.to_owned());
+                                }
+                            }
+                            CargoLine::Other => {}
+                        }
+                        continue;
+                    }
+                }
                 let _ = logs.send(line);
             }
             Ok(None) => break,
@@ -445,41 +475,169 @@ where
             }
         }
     }
+    artifacts
 }
 
-async fn locate_elf(release_dir: &Path) -> Result<PathBuf, BuildFailure> {
-    let mut entries = tokio::fs::read_dir(release_dir)
-        .await
-        .map_err(|error| BuildFailure {
-            message: "Cargo succeeded but the target release directory was not found".to_owned(),
-            details: Some(error.to_string()),
+enum CargoLine {
+    Artifact(PathBuf),
+    Diagnostic(String),
+    Other,
+}
+
+fn parse_cargo_line(line: &str, expected_manifest: &Path) -> Option<CargoLine> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    match value.get("reason")?.as_str()? {
+        "compiler-artifact" => {
+            let is_binary = value
+                .pointer("/target/kind")
+                .and_then(Value::as_array)
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some("bin")));
+            if !is_binary {
+                return Some(CargoLine::Other);
+            }
+            let Some(manifest) = value.get("manifest_path").and_then(Value::as_str) else {
+                return Some(CargoLine::Other);
+            };
+            if !same_manifest(Path::new(manifest), expected_manifest) {
+                return Some(CargoLine::Other);
+            }
+            Some(
+                value
+                    .get("executable")
+                    .and_then(Value::as_str)
+                    .map(|path| CargoLine::Artifact(PathBuf::from(path)))
+                    .unwrap_or(CargoLine::Other),
+            )
+        }
+        "compiler-message" => Some(
+            value
+                .pointer("/message/rendered")
+                .and_then(Value::as_str)
+                .map(|text| CargoLine::Diagnostic(text.to_owned()))
+                .unwrap_or(CargoLine::Other),
+        ),
+        _ => Some(CargoLine::Other),
+    }
+}
+
+fn same_manifest(candidate: &Path, expected: &Path) -> bool {
+    match (candidate.canonicalize(), expected.canonicalize()) {
+        (Ok(candidate), Ok(expected)) => candidate == expected,
+        _ => false,
+    }
+}
+
+async fn select_elf(release_dir: &Path, mut artifacts: Vec<PathBuf>) -> Result<PathBuf, BuildFailure> {
+    artifacts.sort();
+    artifacts.dedup();
+    if artifacts.len() != 1 {
+        return Err(BuildFailure {
+            message: if artifacts.is_empty() {
+                "Cargo succeeded but did not report an ESP application executable".to_owned()
+            } else {
+                "Cargo reported multiple application executables".to_owned()
+            },
+            details: Some(format!(
+                "Expected one binary from the uploaded project in {}. If the project has multiple binaries, select a single firmware binary in Cargo.toml.",
+                release_dir.display()
+            )),
             exit_code: Some(0),
-        })?;
-    let mut candidates = Vec::new();
-    while let Some(entry) = entries.next_entry().await.map_err(|error| BuildFailure {
-        message: "Could not inspect Cargo build output".to_owned(),
+        });
+    }
+    let path = artifacts.pop().expect("one artifact was checked above");
+    let canonical_release = tokio::fs::canonicalize(release_dir).await.map_err(|error| BuildFailure {
+        message: "Cargo succeeded but the target release directory was not found".to_owned(),
         details: Some(error.to_string()),
         exit_code: Some(0),
-    })? {
-        let path = entry.path();
-        let file_type = entry.file_type().await.map_err(|error| BuildFailure {
-            message: "Could not inspect Cargo build output".to_owned(),
-            details: Some(error.to_string()),
-            exit_code: Some(0),
-        })?;
-        let extension = path.extension().and_then(|value| value.to_str());
-        if file_type.is_file() && (extension.is_none() || extension == Some("elf")) {
-            let length = entry.metadata().await.map(|meta| meta.len()).unwrap_or(0);
-            candidates.push((length, path));
-        }
+    })?;
+    let canonical_path = tokio::fs::canonicalize(&path).await.map_err(|error| BuildFailure {
+        message: "Cargo reported an executable that does not exist".to_owned(),
+        details: Some(error.to_string()),
+        exit_code: Some(0),
+    })?;
+    let metadata = tokio::fs::metadata(&canonical_path).await.map_err(|error| BuildFailure {
+        message: "Could not inspect the Cargo executable".to_owned(),
+        details: Some(error.to_string()),
+        exit_code: Some(0),
+    })?;
+    if !canonical_path.starts_with(&canonical_release) || !metadata.is_file() || metadata.len() == 0 {
+        return Err(BuildFailure::new(
+            "Cargo executable is empty or outside the configured target release directory",
+        ));
     }
-    candidates.sort_by_key(|(length, _)| *length);
-    candidates
-        .pop()
-        .map(|(_, path)| path)
-        .ok_or_else(|| BuildFailure {
-            message: "Cargo succeeded but no ESP application ELF was found".to_owned(),
-            details: Some(format!("Searched {}", release_dir.display())),
-            exit_code: Some(0),
+    Ok(canonical_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use tempfile::tempdir;
+
+    use super::{CargoLine, parse_cargo_line, select_elf};
+
+    #[test]
+    fn cargo_messages_only_select_current_projects_binary() {
+        let temp = tempdir().expect("temporary directory");
+        let current = temp.path().join("current/Cargo.toml");
+        let stale = temp.path().join("stale/Cargo.toml");
+        fs::create_dir_all(current.parent().expect("current directory")).expect("current dir");
+        fs::create_dir_all(stale.parent().expect("stale directory")).expect("stale dir");
+        fs::write(&current, "[package]\nname='current'\nversion='0.1.0'\n").expect("manifest");
+        fs::write(&stale, "[package]\nname='stale'\nversion='0.1.0'\n").expect("manifest");
+
+        let artifact = |manifest: &Path, kind: &str, executable: &str| {
+            serde_json::json!({
+                "reason": "compiler-artifact",
+                "manifest_path": manifest,
+                "target": {"kind": [kind]},
+                "executable": executable,
+                "fresh": true
+            })
+            .to_string()
+        };
+        assert!(matches!(
+            parse_cargo_line(&artifact(&stale, "bin", "stale.elf"), &current),
+            Some(CargoLine::Other)
+        ));
+        assert!(matches!(
+            parse_cargo_line(&artifact(&current, "lib", "library.rlib"), &current),
+            Some(CargoLine::Other)
+        ));
+        assert!(matches!(
+            parse_cargo_line(&artifact(&current, "bin", "current.elf"), &current),
+            Some(CargoLine::Artifact(path)) if path == Path::new("current.elf")
+        ));
+    }
+
+    #[test]
+    fn cargo_diagnostics_remain_readable() {
+        let line = serde_json::json!({
+            "reason": "compiler-message",
+            "message": {"rendered": "error[E0425]: missing symbol\n --> src/main.rs:1:1\n"}
         })
+        .to_string();
+        assert!(matches!(
+            parse_cargo_line(&line, Path::new("Cargo.toml")),
+            Some(CargoLine::Diagnostic(text)) if text.contains("error[E0425]")
+        ));
+    }
+
+    #[tokio::test]
+    async fn never_selects_a_larger_stale_elf() {
+        let temp = tempdir().expect("temporary directory");
+        let release = temp.path().join("release");
+        fs::create_dir_all(&release).expect("release directory");
+        let current = release.join("current");
+        let stale = release.join("stale");
+        fs::write(&current, b"small current ELF").expect("current ELF");
+        fs::write(&stale, vec![0_u8; 2048]).expect("stale ELF");
+
+        let selected = select_elf(&release, vec![current.clone()])
+            .await
+            .expect("reported ELF should be selected");
+        assert_eq!(selected, current.canonicalize().expect("canonical current ELF"));
+        assert!(select_elf(&release, vec![]).await.is_err());
+        assert!(select_elf(&release, vec![current, stale]).await.is_err());
+    }
 }

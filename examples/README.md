@@ -7,6 +7,8 @@ through the dashboard:
 - `uploaded-firmware-basic/` is a minimal managed application.
 - `uploaded-firmware-with-libs/` shows that uploaded applications can use normal
   Cargo libraries when those libraries support `xtensa-esp32s3-espidf`.
+- `local-mqtt/` is a Windows example for a separate TLS Mosquitto broker,
+  device/backend topic permissions, and the corresponding `.env` settings.
 
 ## Create an upload ZIP
 

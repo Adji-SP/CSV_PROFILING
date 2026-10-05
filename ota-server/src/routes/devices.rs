@@ -103,6 +103,12 @@ pub async fn deploy(
             )
         );
     }
+    if device.current_version == firmware.version {
+        return Err(ApiError::conflict(
+            "VERSION_ALREADY_RUNNING",
+            "This device already reports this version; build a new version to deploy a different image",
+        ));
+    }
     let deployment_id = Uuid::new_v4().to_string();
     state.storage.create_deployment(&deployment_id, &device_id, &firmware).await?;
     Ok((
@@ -115,6 +121,15 @@ pub async fn deploy(
             status: "pending",
         }),
     ))
+}
+
+/// Cancels the server-side instruction. It cannot interrupt an image already being installed.
+pub async fn cancel_update(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+) -> ApiResult<Json<Device>> {
+    validate_device_id(&device_id)?;
+    Ok(Json(state.storage.cancel_update(&device_id).await?))
 }
 
 pub async fn check_update(
@@ -173,6 +188,12 @@ pub async fn ota_status(
     }
     if let Some(version) = request.current_version.as_deref() {
         validate_short_text("current_version", version, 64)?;
+    }
+    if matches!(request.status, OtaStatus::Success) && request.current_version.is_none() {
+        return Err(ApiError::unprocessable(
+            "CURRENT_VERSION_REQUIRED",
+            "A success report must include the version that actually booted",
+        ));
     }
     Ok(
         Json(

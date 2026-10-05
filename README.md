@@ -14,6 +14,12 @@ Cloud resources and live MQTT credentials are not provisioned automatically. Sen
 telemetry remains deferred. Set `OTA_CONSOLE_ONLY=true` for a hosted read-only service;
 never expose the trusted local firmware compiler publicly.
 
+For the opt-in Windows development setup with a named Cloudflare Tunnel, see
+[Cloudflare Tunnel setup](docs/CLOUDFLARE_DEV_SETUP.md). It serves the existing
+Flask dashboard on `:5173` and Rust API on `:8080`; the normal `:5000`/`:7000`
+launchers remain unchanged. The guide explains public hostname routes, security,
+MQTT/WebSocket behavior, and verification.
+
 ## Beginner handbook
 
 The illustrated LaTeX module in [`docs/book`](docs/book/README.md) teaches the whole project from first startup through CSV internals, the Axum build pipeline, initial ESP32-S3 flashing, function-based uploaded firmware, OTA deployment, rollback, troubleshooting, and safe extension points. Complete English and Bahasa Indonesia editions are generated alongside their LaTeX sources.
@@ -241,18 +247,45 @@ Errors use a structured envelope:
 
 Firmware paths are reconstructed inside `firmware-builds` and canonicalized before download/deletion. Firmware referenced by a device or deployment history is rejected with `409 Conflict` rather than silently orphaning records.
 
+Build requests reserve a project atomically, so a double-click cannot start two
+builds of the same upload. If the OTA server stops mid-build, it marks that job
+failed on the next startup and leaves its log visible; start a new build to retry.
+Run only one full OTA server against a given SQLite database. Multi-instance
+workers need a shared job lease before they can safely recover interrupted jobs.
+
 ## Device client, partitions, and rollback
 
 See [`examples/esp32-rust-ota-client/README.md`](examples/esp32-rust-ota-client/README.md) and [`docs/OTA_GUIDE.md`](docs/OTA_GUIDE.md). The stable runtime streams the HTTP response into the inactive OTA partition in 4 KiB chunks while calculating SHA-256; it does not buffer the firmware in RAM.
 
 An OTA-ready device needs `otadata` and at least `ota_0` / `ota_1`. Flash the partition table and rollback-capable bootloader during initial provisioning; OTA downloads update only the inactive application slot.
 
+The Devices page can **Cancel queued OTA**. This clears the server's desired image,
+so an offline device will not fetch that image when it reconnects. The matching
+API is `DELETE /api/ota/devices/{device_id}/update`. Cancellation cannot stop an
+image already downloaded or being installed. Registration or heartbeat from a
+device running the queued version now completes the deployment even if the
+separate success callback was lost.
+If a device reported `rebooting` but later registers with a different version,
+the server marks that deployment failed and clears the desired image to avoid
+an endless retry after rollback or USB recovery. Inspect the device and build
+logs before deploying that image again.
+
+To manually revert to an earlier version, select its retained, known-good image
+and use the normal Deploy action. This queues an OTA update to that version; it
+is different from ESP-IDF's automatic bootloader rollback after a bad boot.
+Both require a reachable device. If bad Wi-Fi credentials make the device
+offline, cancel the stale queued image first and recover over USB. Rebuilding
+after changing `.env` is essential: existing `.bin` files keep the credentials
+compiled into them. Give the corrected image a new version before deploying.
+
 ## TinyML monitoring
 
-The **TinyML** page tracks MQTT inference runs separately from CSV reports and
-console logs. It provides live results, custom-field charts, classification and
-embedded-performance reports, and JSON/CSV downloads. Use the same console
-viewer token; registered devices publish with their own MQTT credentials.
+**Monitoring → Reporting** tracks MQTT inference runs separately from CSV reports
+and device logs. It provides live results, custom-field charts, classification
+and embedded-performance reports, and JSON/CSV downloads. The single
+**Monitoring access** panel unlocks Reporting and Remote Console with one viewer
+token; registered devices publish with their own MQTT credentials. Until viewer
+access is connected, monitoring data and its device selectors remain locked.
 
 Start with [the TinyML guide](docs/TINYML_GUIDE.md), including protocol examples,
 Azure/PostgreSQL setup, metric definitions, and troubleshooting. A function-based
@@ -268,3 +301,10 @@ Commands use argument arrays rather than a shell; artifacts are hashed and file
 serving is confined to the build directory.
 
 However, `cargo build` executes `build.rs`, proc macros, and dependency build scripts. **Only build trusted projects on the host.** `FirmwareBuilder` isolates this execution behind a trait so a future `DockerFirmwareBuilder` can sandbox it without changing API routes. SHA-256 detects corruption but does not authenticate publishers; production deployments should add real image signing and device-side signature verification rather than treating a hash as a signature.
+
+**Do not expose the OTA administration routes through a public tunnel yet.**
+Upload/build/delete/deploy and device callbacks do not currently have admin or
+per-device authentication. The Monitoring viewer token protects only Reporting
+and Remote Console, and CORS is not authorization. Uploaded Cargo projects also
+run with access to the developer host environment. Keep the full OTA API on a
+trusted LAN until authentication and isolated builds are implemented.

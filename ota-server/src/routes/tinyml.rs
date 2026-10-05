@@ -56,7 +56,7 @@ async fn authenticate(State(state): State<AppState>, request: Request, next: Nex
 }
 async fn status(State(s): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(
-        json!({"schema_version":"1.0","mqtt_enabled":s.tinyml.settings.enabled,"topic_prefix":s.tinyml.settings.prefix,"overview":s.tinyml.repo.overview().await?}),
+        json!({"schema_version":"1.0","mqtt_enabled":s.tinyml.settings.enabled,"mqtt_configured":s.console.mqtt_configured(),"mqtt_connected":s.console.mqtt_connected(),"topic_prefix":s.tinyml.settings.prefix,"overview":s.tinyml.repo.overview().await?}),
     ))
 }
 async fn devices(State(s): State<AppState>) -> ApiResult<Json<Value>> {
@@ -99,7 +99,8 @@ async fn report_download(State(s): State<AppState>, Path(id): Path<String>) -> A
 async fn other_fields(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let r = match s.tinyml.repo.report(&id).await {
         Ok(r) => r,
-        Err(_) => s.tinyml.metrics(&id).await?,
+        Err(error) if error.status == StatusCode::NOT_FOUND => s.tinyml.metrics(&id).await?,
+        Err(error) => return Err(error),
     };
     Ok(Json(r.get("other").cloned().unwrap_or(Value::Null)))
 }

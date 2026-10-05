@@ -5,7 +5,7 @@ use std::{thread, time::Duration};
 use anyhow::{bail, ensure, Context, Result};
 use embedded_svc::http::client::Client as HttpClient;
 use esp_idf_svc::{
-    http::client::{EspHttpConnection, Method},
+    http::client::{Configuration as HttpConfiguration, EspHttpConnection, FollowRedirectsPolicy, Method},
     io::{utils::try_read_full, Write},
     ota::{EspOta, SlotState},
 };
@@ -171,7 +171,16 @@ fn validate_config(config: &OtaConfig) -> Result<()> {
 
 fn new_http_client() -> Result<HttpClient<EspHttpConnection>> {
     Ok(HttpClient::wrap(EspHttpConnection::new(
-        &Default::default(),
+        &HttpConfiguration {
+            // Required for public HTTPS origins such as a named Cloudflare
+            // Tunnel. Verify the certificate chain AND hostname, never skip TLS.
+            crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
+            timeout: Some(Duration::from_secs(30)),
+            // An Access login redirect is not a firmware image. Report the
+            // HTTP failure instead of downloading HTML or following another host.
+            follow_redirects_policy: FollowRedirectsPolicy::FollowNone,
+            ..Default::default()
+        },
     )?))
 }
 

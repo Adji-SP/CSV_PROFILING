@@ -6,7 +6,7 @@
    - POST /clean -> pandas operations + cleaned CSV download
 ===================================================== */
 
-const API_BASE    = location.protocol === "https:" ? location.origin : "http://localhost:5000";
+const API_BASE    = location.origin;
 const SESSION_KEY = "csv_profiler_current_session";
 
 // -- DOM refs --------------------------------------------------
@@ -23,6 +23,8 @@ const navProfiler   = document.getElementById("nav-profiler");
 const navRuns       = document.getElementById("nav-runs");
 const navCsvGroup   = document.getElementById("nav-csv-toggle");
 const navCsvSubmenu = document.getElementById("nav-csv-submenu");
+const navMonitorGroup = document.getElementById("nav-monitor-toggle");
+const navMonitorSubmenu = document.getElementById("nav-monitor-submenu");
 const navOta        = document.getElementById("nav-ota");
 const navDevices    = document.getElementById("nav-devices");
 const navBuilds     = document.getElementById("nav-builds");
@@ -301,6 +303,11 @@ navCsvGroup?.addEventListener("click", () => {
   navCsvGroup.setAttribute("aria-expanded", String(!expanded));
   navCsvSubmenu.hidden = expanded;
 });
+navMonitorGroup?.addEventListener("click", () => {
+  const expanded = navMonitorGroup.getAttribute("aria-expanded") === "true";
+  navMonitorGroup.setAttribute("aria-expanded", String(!expanded));
+  navMonitorSubmenu.hidden = expanded;
+});
 
 navOta?.addEventListener("click", (e) => {
   e.preventDefault();
@@ -325,6 +332,10 @@ function showSection(id, activeNav = null) {
   ["upload-section","progress-section","report-section","ota-section","devices-section","builds-section","console-section","tinyml-section"].forEach((sid) => {
     document.getElementById(sid).classList.toggle("hidden", sid !== id);
   });
+  const monitoring = id === "console-section" || id === "tinyml-section";
+  const accessPanel = document.getElementById("viewer-access-panel");
+  if (monitoring) document.getElementById(id).querySelector(".page-title, .tml-page-head").after(accessPanel);
+  accessPanel.classList.toggle("hidden", !monitoring);
   newAnalysisBtn.style.display = id === "report-section" ? "inline-block" : "none";
   const sectionMeta = {
     "upload-section":   { nav: activeNav || "profiler", title: activeNav === "runs" ? "CSV Runs" : "CSV Profiler" },
@@ -343,6 +354,7 @@ function showSection(id, activeNav = null) {
 
 function setActiveNav(active) {
   navCsvGroup?.classList.toggle("active-parent", active === "profiler" || active === "runs");
+  navMonitorGroup?.classList.toggle("active-parent", active === "console" || active === "tinyml");
   document.getElementById("nav-tinyml")?.classList.toggle("active", active === "tinyml");
   document.getElementById("nav-console")?.classList.toggle("active", active === "console");
   navProfiler?.classList.toggle("active", active === "profiler");

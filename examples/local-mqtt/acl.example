@@ -1,0 +1,10 @@
+# The dashboard viewer token is NOT an MQTT account.
+# The Rust server may read device logs and TinyML messages.
+user console-backend
+topic read devices/+/logs
+topic read tinyml/v1/#
+
+# One identity for one board. Change both the username and topic if DEVICE_ID changes.
+user ESP32-S3-001
+topic write devices/ESP32-S3-001/logs
+topic write tinyml/v1/ESP32-S3-001/#

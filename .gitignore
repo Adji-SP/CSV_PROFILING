@@ -1,6 +1,12 @@
 python/.venv/
 python/__pycache__/
 .env
+.env.*
+!.env.example
+cloudflared/config.yml
+cloudflared/*.json
+*.pem
+*.key
 
 python/uploads/*
 !python/uploads/Placeholder.txt

@@ -24,6 +24,7 @@ struct StatusResponse {
 pub fn router(state: AppState) -> Router {
     let console_routes = Router::new()
         .merge(tinyml::router(state.clone()))
+        .route("/health", get(health))
         .route("/api/ota/status", get(status))
         .route("/api/ota/console/ws", get(crate::console::stream))
         .route("/api/ota/console/devices", get(crate::console::devices));
@@ -60,7 +61,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/ota/devices/{device_id}/deploy", post(devices::deploy))
         .route(
             "/api/ota/devices/{device_id}/update",
-            get(devices::check_update),
+            get(devices::check_update).delete(devices::cancel_update),
         )
         .route(
             "/api/ota/devices/{device_id}/ota-status",
@@ -68,6 +69,10 @@ pub fn router(state: AppState) -> Router {
         )
         .fallback(not_found)
         .with_state(state)
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"status": "ok", "service": "csv-profiling-api"}))
 }
 
 async fn status(

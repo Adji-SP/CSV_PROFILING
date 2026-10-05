@@ -3,6 +3,7 @@
   let socket;
   let paused = false;
   let rows = [];
+  const access = window.viewerAccess;
 
   function setStatus(message, kind = "idle") {
     const panel = el("status");
@@ -14,11 +15,12 @@
     const badge = el("connection-badge");
     if (!badge) return;
     badge.className = `status-badge status-${kind === "online" ? "online" : kind === "error" ? "failed" : "idle"}`;
-    badge.textContent = kind === "online" ? "Connected" : kind === "error" ? "Connection issue" : "Disconnected";
+    badge.textContent = !access.get() ? "Access required" : kind === "online" ? "Streaming" : kind === "error" ? "Stream issue" : "Stream stopped";
   }
 
   function setDeviceOptions(items) {
     const select = el("device");
+    const previous = select.value;
     if (!items.length) {
       select.replaceChildren(new Option("No registered devices", ""));
       select.disabled = true;
@@ -27,35 +29,33 @@
       return;
     }
     select.replaceChildren(...items.map(device => new Option(`${device.name} (${device.device_id})`, device.device_id)));
+    if (items.some(device => device.device_id === previous)) select.value = previous;
     select.disabled = false;
-    el("connect").disabled = !el("token").value.trim();
+    el("connect").disabled = !access.get() || !!socket;
     setStatus(`${items.length} device${items.length === 1 ? "" : "s"} found.`);
   }
 
   async function devices() {
+    const token = access.get();
+    if (!token) return;
     const refresh = el("refresh");
     refresh.disabled = true;
     refresh.textContent = "Loading...";
     setStatus("Loading registered devices...");
     try {
-      let items;
-      try {
-        items = await getDevices();
-      } catch (publicError) {
-        const token = el("token").value.trim();
-        if (!token) throw new Error("Enter the console access token to load devices from this server.");
-        items = await otaRequest("/api/ota/console/devices", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
+      const items = await otaRequest("/api/ota/console/devices", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (access.get() !== token) return;
       setDeviceOptions(items);
     } catch (error) {
+      if (access.get() !== token) return;
       el("device").replaceChildren(new Option("Devices unavailable", ""));
       el("device").disabled = true;
       el("connect").disabled = true;
       setStatus(error.message, "error");
     } finally {
-      refresh.disabled = false;
+      refresh.disabled = !access.get();
       refresh.innerHTML = '<span aria-hidden="true">&#8635;</span> Refresh';
     }
   }
@@ -80,12 +80,12 @@
     socket = undefined;
     active?.close();
     el("disconnect").disabled = true;
-    el("connect").disabled = !el("device").value || !el("token").value.trim();
+    el("connect").disabled = !el("device").value || !access.get();
     setStatus(message);
   }
 
   el("connect").onclick = () => {
-    const token = el("token").value.trim();
+    const token = access.get();
     if (!el("device").value || !token) {
       setStatus("Select a registered device and enter the access token.", "error");
       return;
@@ -123,13 +123,14 @@
     };
   };
 
-  el("disconnect").onclick = () => disconnect();
+  el("disconnect").onclick = () => {
+    disconnect();
+  };
   el("refresh").onclick = devices;
-  el("token").oninput = () => { el("connect").disabled = !el("device").value || !el("token").value.trim(); };
   el("device").onchange = () => {
     if (socket) disconnect("Device changed. Connect when ready.");
     rows = [];
-    el("connect").disabled = !el("device").value || !el("token").value.trim();
+    el("connect").disabled = !el("device").value || !access.get();
     render();
   };
   el("pause").onclick = () => {
@@ -148,10 +149,24 @@
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  document.getElementById("nav-console").onclick = event => {
+  access.subscribe(() => {
+    const connected = !!access.get();
+    for (const id of ["refresh", "level", "filter", "scroll", "pause"]) el(id).disabled = !connected;
+    if (!connected) {
+      disconnect("Connect viewer access to choose a device.");
+      el("device").replaceChildren(new Option("Connect viewer access first", ""));
+      el("device").disabled = true;
+      el("connect").disabled = true;
+      paused = false;
+      el("pause").textContent = "Pause";
+      rows = [];
+      render();
+    } else if (!document.getElementById("console-section").classList.contains("hidden")) devices();
+  });
+  document.getElementById("nav-console").onclick = async event => {
     event.preventDefault();
     showSection("console-section", "console");
-    devices();
+    if (access.get()) await devices();
   };
   window.addEventListener("beforeunload", () => socket?.close());
 })();

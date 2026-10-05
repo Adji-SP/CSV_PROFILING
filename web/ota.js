@@ -2,7 +2,7 @@
    OTA Firmware client - isolated from the Flask CSV API
 ===================================================== */
 
-const OTA_API_BASE = location.protocol === "https:" ? location.origin : "http://localhost:7000";
+const OTA_API_BASE = window.APP_CONFIG?.otaApiBase || (location.protocol === "https:" ? location.origin : "http://localhost:7000");
 
 const otaProjectInput = document.getElementById("ota-project-input");
 const otaTarget = document.getElementById("ota-target");
@@ -16,8 +16,6 @@ const firmwareCount = document.getElementById("firmware-count");
 const buildsTbody = document.getElementById("builds-tbody");
 const deviceGrid = document.getElementById("device-grid");
 const devicesEmpty = document.getElementById("devices-empty");
-const serviceIndicator = document.getElementById("ota-service-indicator");
-const otaSummaryService = document.getElementById("ota-summary-service");
 const otaSummaryFirmware = document.getElementById("ota-summary-firmware");
 const otaSummaryDevices = document.getElementById("ota-summary-devices");
 const otaSummaryBuilds = document.getElementById("ota-summary-builds");
@@ -26,13 +24,14 @@ let otaFirmware = [];
 let otaDevices = [];
 let otaBuilds = [];
 let activeBuildPoll = null;
+let otaSelectedProject = null;
 
 async function otaRequest(path, options = {}) {
   let response;
   try {
     response = await fetch(`${OTA_API_BASE}${path}`, options);
   } catch (error) {
-    throw new Error(`OTA server is unavailable at ${OTA_API_BASE}`);
+    throw new Error(`Cannot reach the OTA backend at ${OTA_API_BASE}. Start the Rust server and check /api/ota/status.`);
   }
   if (response.status === 204) return null;
 
@@ -84,27 +83,47 @@ async function deployFirmware(deviceId, firmwareId) {
   });
 }
 
+async function cancelOtaUpdate(deviceId) {
+  return otaRequest(`/api/ota/devices/${encodeURIComponent(deviceId)}/update`, {
+    method: "DELETE",
+  });
+}
+
 async function checkOtaService() {
   try {
-    const status = await otaRequest("/api/ota/status");
-    serviceIndicator.className = "service-indicator online";
-    serviceIndicator.innerHTML = '<span class="service-dot"></span> OTA online';
-    serviceIndicator.title = `${status.service} ${status.version}\nFirmware URL: ${status.public_base_url}`;
-    if (otaSummaryService) {
-      otaSummaryService.textContent = "Online";
-      otaSummaryService.classList.remove("is-offline");
-    }
-    return status;
-  } catch (error) {
-    serviceIndicator.className = "service-indicator offline";
-    serviceIndicator.innerHTML = '<span class="service-dot"></span> OTA offline';
-    serviceIndicator.title = error.message;
-    if (otaSummaryService) {
-      otaSummaryService.textContent = "Offline";
-      otaSummaryService.classList.add("is-offline");
-    }
-    return null;
+    return await otaRequest("/api/ota/status");
+  } catch { return null; }
+}
+
+function setOtaProject(file) {
+  const error = document.getElementById("ota-project-error");
+  const drop = document.getElementById("ota-project-drop");
+  if (!file || !file.name.toLowerCase().endsWith(".zip")) {
+    clearOtaProject();
+    error.textContent = "Choose a .zip archive.";
+    drop.classList.add("has-error");
+    return false;
   }
+  otaSelectedProject = file;
+  error.textContent = "";
+  drop.classList.remove("has-error");
+  drop.classList.add("has-file");
+  document.getElementById("ota-project-prompt").textContent = "Drop another ZIP to replace";
+  document.getElementById("ota-project-browse").textContent = "Browse another";
+  document.getElementById("ota-project-name").textContent = file.name;
+  document.getElementById("ota-project-size").textContent = otaBytes(file.size);
+  document.getElementById("ota-project-file").classList.remove("hidden");
+  return true;
+}
+
+function clearOtaProject() {
+  otaSelectedProject = null;
+  otaProjectInput.value = "";
+  document.getElementById("ota-project-drop").classList.remove("has-file", "has-error", "drag-over");
+  document.getElementById("ota-project-prompt").textContent = "Drop your Rust project here";
+  document.getElementById("ota-project-browse").textContent = "Browse files";
+  document.getElementById("ota-project-file").classList.add("hidden");
+  document.getElementById("ota-project-error").textContent = "";
 }
 
 function setOtaBuildState(status, label = null) {
@@ -172,10 +191,10 @@ function renderFirmware() {
       <td>${otaDate(firmware.created_at)}</td>
       <td>${badge(firmware.status)}</td>
       <td><div class="row-actions">
-        <a class="btn-sm action-link" href="${esc(firmware.download_url)}">Download</a>
-        <button class="btn-primary-sm" data-firmware-deploy="${esc(firmware.firmware_id)}">Deploy</button>
+        ${firmware.status === "ready" ? `<a class="btn-sm action-link" href="${esc(firmware.download_url)}">Download</a>` : '<span class="muted">Deletion pending</span>'}
+        <button class="btn-primary-sm" data-firmware-deploy="${esc(firmware.firmware_id)}" ${firmware.status !== "ready" ? "disabled" : ""}>Deploy</button>
         <button class="btn-sm" data-firmware-detail="${esc(firmware.firmware_id)}">Details</button>
-        <button class="btn-ghost-sm" data-firmware-delete="${esc(firmware.firmware_id)}">Delete</button>
+        <button class="btn-ghost-sm" data-firmware-delete="${esc(firmware.firmware_id)}">${firmware.status === "deleting" ? "Retry delete" : "Delete"}</button>
       </div></td>
     </tr>`).join("");
 
@@ -212,13 +231,14 @@ function showFirmwareDetails(firmwareId) {
 }
 
 function confirmFirmwareDelete(firmwareId) {
-  showConfirm("Delete this firmware binary? Deployed or desired firmware cannot be deleted.", async () => {
+  showConfirm("Delete this binary? Deployment history is kept. Queued or currently running versions are protected. Deleted binaries cannot be used for a future manual rollback.", async () => {
     try {
       await otaRequest(`/api/ota/firmware/${encodeURIComponent(firmwareId)}`, { method: "DELETE" });
       showToast("Firmware deleted.", "success");
       await loadFirmware();
     } catch (error) {
       showToast(error.message, "error", 7000);
+      await loadFirmware(false);
     }
   });
 }
@@ -262,11 +282,28 @@ function renderDevices() {
         <div class="prog-track"><div class="prog-fill ota-progress" style="width:${progress}%"></div></div>
         ${device.ota_error ? `<p class="error-text device-error">${esc(device.ota_error)}</p>` : ""}
       </div>
-      <button class="btn-primary-sm" data-device-deploy="${esc(device.device_id)}">Deploy OTA</button>
+      <div class="device-actions">
+        <button class="btn-primary-sm" data-device-deploy="${esc(device.device_id)}">Deploy OTA</button>
+        ${device.desired_firmware_id ? `<button class="btn-sm" data-device-cancel="${esc(device.device_id)}">Cancel queued OTA</button>` : ""}
+      </div>
     </article>`;
   }).join("");
   deviceGrid.querySelectorAll("[data-device-deploy]").forEach((button) => {
     button.addEventListener("click", () => openDeployDialog(button.dataset.deviceDeploy, null));
+  });
+  deviceGrid.querySelectorAll("[data-device-cancel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const deviceId = button.dataset.deviceCancel;
+      showConfirm("Stop offering the queued firmware to this device? This cannot interrupt an installation already in progress.", async () => {
+        try {
+          await cancelOtaUpdate(deviceId);
+          showToast("Queued OTA cancelled.", "success");
+          await loadDevices(false);
+        } catch (error) {
+          showToast(error.message, "error", 7000);
+        }
+      });
+    });
   });
 }
 
@@ -387,9 +424,10 @@ async function submitDeployment() {
 }
 
 otaBuildBtn?.addEventListener("click", async () => {
-  const file = otaProjectInput.files[0];
+  const file = otaSelectedProject;
   const version = otaVersion.value.trim();
   if (!file || !file.name.toLowerCase().endsWith(".zip")) {
+    setOtaProject(file);
     showToast("Choose a Rust project .zip file.", "error");
     return;
   }
@@ -423,6 +461,22 @@ otaBuildBtn?.addEventListener("click", async () => {
     showToast(error.message, "error", 8000);
   }
 });
+
+otaProjectInput?.addEventListener("change", () => {
+  const file = otaProjectInput.files[0];
+  if (file) setOtaProject(file);
+  otaProjectInput.value = "";
+});
+const otaProjectDrop = document.getElementById("ota-project-drop");
+otaProjectDrop?.addEventListener("dragover", event => { event.preventDefault(); otaProjectDrop.classList.add("drag-over"); });
+otaProjectDrop?.addEventListener("dragleave", () => otaProjectDrop.classList.remove("drag-over"));
+otaProjectDrop?.addEventListener("drop", event => {
+  event.preventDefault();
+  otaProjectDrop.classList.remove("drag-over");
+  const file = event.dataTransfer?.files?.[0];
+  if (file) setOtaProject(file);
+});
+document.getElementById("ota-project-remove")?.addEventListener("click", clearOtaProject);
 
 document.getElementById("ota-refresh")?.addEventListener("click", loadOtaDashboard);
 document.getElementById("devices-refresh")?.addEventListener("click", () => loadDevices());

@@ -36,7 +36,14 @@ set of tables, and WebSocket stream; telemetry never initiates a firmware action
    provisioning workflow. `device_id` must match the MQTT identity and envelope.
 6. Restart the Rust service (`run-dev.bat` / `run-dev.sh`). Migration 002 adds
    TinyML tables; it does not replace CSV, devices, firmware or console storage.
-7. Open **TinyML**, enter the viewer token, and press **Connect**.
+7. Open **Monitoring → Reporting** or **Monitoring → Remote Console**. Use the
+   single **Monitoring access** panel to enter the viewer token. Both views show
+   their controls, but device selection and data actions stay disabled until the
+   server accepts it. The **Connect** button itself is disabled until you enter
+   a token.
+   **Disconnect** in that panel clears access to both views. **Stop stream** on
+   Remote Console only stops that device's live log stream. A browser reload
+   asks for the token again.
 
 No run appears merely because a USB cable is attached. The firmware must publish
 TinyML messages. Existing firmware needs rebuilding with the new helper/runtime.

@@ -1,0 +1,9 @@
+# Local development broker, separate from the existing Windows service on 1883.
+# Replace MQTT_DATA_DIR with the forward-slash path to your private MQTT folder.
+# Do not publish this listener directly to the Internet.
+listener 8883 0.0.0.0
+allow_anonymous false
+password_file MQTT_DATA_DIR/passwords
+acl_file MQTT_DATA_DIR/acl
+certfile MQTT_DATA_DIR/server.crt
+keyfile MQTT_DATA_DIR/server.key

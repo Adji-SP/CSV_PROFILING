@@ -1,0 +1,12 @@
+# Example for a LOCALLY managed tunnel only. Copy outside the repository to
+# your cloudflared configuration directory. Replace the tunnel UUID,
+# credentials path, and hostnames if your account uses different values.
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: C:\Users\YOUR_USERNAME\.cloudflared\YOUR_TUNNEL_UUID.json
+
+ingress:
+  - hostname: dev.iot-prototype.net
+    service: http://127.0.0.1:5173
+  - hostname: api-dev.iot-prototype.net
+    service: http://127.0.0.1:18080
+  - service: http_status:404

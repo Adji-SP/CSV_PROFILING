@@ -11,11 +11,14 @@ use axum::{
     http::HeaderMap,
     response::Response,
 };
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, Transport};
+use rumqttc::{
+    AsyncClient, ConnectReturnCode, Event, Incoming, MqttOptions, QoS, SubscribeReasonCode,
+    Transport,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
     time::Duration,
 };
 use tokio::sync::{Mutex, broadcast};
@@ -35,6 +38,8 @@ pub struct LogEntry {
 
 pub struct Console {
     token: String,
+    mqtt_configured: bool,
+    mqtt_connected: AtomicBool,
     history: Mutex<HashMap<String, VecDeque<LogEntry>>>,
     events: broadcast::Sender<LogEntry>,
 }
@@ -45,6 +50,8 @@ impl Console {
         let (events, _) = broadcast::channel(512);
         Arc::new(Self {
             token,
+            mqtt_configured: false,
+            mqtt_connected: AtomicBool::new(false),
             history: Mutex::new(HashMap::new()),
             events,
         })
@@ -53,9 +60,27 @@ impl Console {
         let (events, _) = broadcast::channel(512);
         Arc::new(Self {
             token: std::env::var("CONSOLE_VIEWER_TOKEN").unwrap_or_default(),
+            mqtt_configured: std::env::var("MQTT_HOST").is_ok(),
+            mqtt_connected: AtomicBool::new(false),
             history: Mutex::new(HashMap::new()),
             events,
         })
+    }
+
+    pub fn mqtt_configured(&self) -> bool {
+        self.mqtt_configured
+    }
+
+    pub fn mqtt_connected(&self) -> bool {
+        self.mqtt_connected.load(Ordering::Relaxed)
+    }
+
+    fn set_mqtt_connected(&self, connected: bool, tinyml: &crate::tinyml::TinyMl) {
+        if self.mqtt_connected.swap(connected, Ordering::Relaxed) != connected {
+            let _ = tinyml.events.send(serde_json::json!({
+                "type": "tinyml.broker.status", "connected": connected
+            }));
+        }
     }
 
     pub async fn accept(&self, topic: &str, payload: &[u8]) {
@@ -106,12 +131,19 @@ impl Console {
         let Ok(host) = std::env::var("MQTT_HOST") else {
             return Ok(());
         };
+        if host.trim().is_empty() {
+            return Err("MQTT_HOST must not be empty when configured".into());
+        }
         if self.token.len() < 32 {
             return Err("CONSOLE_VIEWER_TOKEN must contain at least 32 characters".into());
         }
-        let port = std::env::var("MQTT_PORT")
+        let port: u16 = std::env::var("MQTT_PORT")
             .unwrap_or("8883".into())
-            .parse()?;
+            .parse()
+            .map_err(|_| "MQTT_PORT must be a number between 1 and 65535")?;
+        if port == 0 {
+            return Err("MQTT_PORT must be a number between 1 and 65535".into());
+        }
         let mut options = MqttOptions::new(
             std::env::var("MQTT_CLIENT_ID").unwrap_or("ota-console-backend".into()),
             host,
@@ -125,7 +157,8 @@ impl Console {
         options.set_manual_acks(true);
         options.set_clean_session(false);
         options.set_credentials(
-            std::env::var("MQTT_USERNAME")?,
+            std::env::var("MQTT_USERNAME")
+                .map_err(|_| "MQTT_USERNAME is required when MQTT_HOST is set")?,
             std::env::var("MQTT_PASSWORD").unwrap_or_default(),
         );
         let ca = std::env::var("MQTT_CA_FILE").ok();
@@ -134,13 +167,20 @@ impl Console {
         match (ca, cert, key) {
             (Some(ca), Some(cert), Some(key)) => {
                 options.set_transport(Transport::tls(
-                    std::fs::read(ca)?,
-                    Some((std::fs::read(cert)?, std::fs::read(key)?)),
+                    std::fs::read(ca).map_err(|e| format!("MQTT_CA_FILE cannot be read: {e}"))?,
+                    Some((
+                        std::fs::read(cert).map_err(|e| format!("MQTT_CERT_FILE cannot be read: {e}"))?,
+                        std::fs::read(key).map_err(|e| format!("MQTT_KEY_FILE cannot be read: {e}"))?,
+                    )),
                     None,
                 ));
             }
             (Some(ca), None, None) => {
-                options.set_transport(Transport::tls(std::fs::read(ca)?, None, None));
+                options.set_transport(Transport::tls(
+                    std::fs::read(ca).map_err(|e| format!("MQTT_CA_FILE cannot be read: {e}"))?,
+                    None,
+                    None,
+                ));
             }
             (None, None, None) => {
                 let roots = rustls::RootCertStore::from_iter(
@@ -192,16 +232,25 @@ impl Console {
         });
         let console = self.clone();
         tokio::spawn(async move {
+            let mut pending_subscriptions = 0usize;
             loop {
                 let next = tokio::select! {
-                    _=shutdown.changed()=>{let _=client.try_disconnect();break;},
+                    _=shutdown.changed()=>{console.set_mqtt_connected(false, &tinyml);let _=client.try_disconnect();break;},
                     next=events.poll()=>next,
                 };
                 match next {
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        if client.try_subscribe("devices/+/logs", QoS::AtMostOnce).is_err() {
+                    Ok(Event::Incoming(Incoming::ConnAck(ack))) => {
+                        console.set_mqtt_connected(false, &tinyml);
+                        pending_subscriptions = 0;
+                        if ack.code != ConnectReturnCode::Success {
+                            tracing::warn!(reason=?ack.code, "MQTT broker rejected the backend connection");
                             events.clean();continue;
                         }
+                        if client.try_subscribe("devices/+/logs", QoS::AtMostOnce).is_err() {
+                            console.set_mqtt_connected(false, &tinyml);
+                            events.clean();continue;
+                        }
+                        pending_subscriptions += 1;
                         if tinyml.settings.enabled
                             && client
                                 .try_subscribe(
@@ -210,7 +259,23 @@ impl Console {
                                 )
                                 .is_err()
                         {
+                            console.set_mqtt_connected(false, &tinyml);
                             events.clean();continue;
+                        }
+                        pending_subscriptions += usize::from(tinyml.settings.enabled);
+                    }
+                    Ok(Event::Incoming(Incoming::SubAck(ack))) => {
+                        if ack.return_codes.iter().any(|code| matches!(code, SubscribeReasonCode::Failure)) {
+                            tracing::warn!("MQTT broker denied a backend subscription; check its ACL");
+                            console.set_mqtt_connected(false, &tinyml);
+                            pending_subscriptions = 0;
+                            events.clean();continue;
+                        }
+                        if pending_subscriptions > 0 {
+                            pending_subscriptions -= 1;
+                            if pending_subscriptions == 0 {
+                                console.set_mqtt_connected(true, &tinyml);
+                            }
                         }
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) if !p.retain => {
@@ -224,21 +289,24 @@ impl Console {
                                     // Never block the MQTT poller behind the ACK request queue.
                                     // Close without ACK; the persistent broker session redelivers.
                                     tracing::warn!("TinyML ingestion backpressure; reconnecting for QoS 1 redelivery");
+                                    console.set_mqtt_connected(false, &tinyml);
                                     events.clean();
                                     tokio::select!{_=shutdown.changed()=>break,_=tokio::time::sleep(Duration::from_secs(1))=>{}}
                                 }
                             }
                         } else {
                             console.accept(&p.topic, &p.payload).await;
-                            if client.try_ack(&p).is_err(){events.clean();}
+                            if client.try_ack(&p).is_err(){console.set_mqtt_connected(false, &tinyml);events.clean();}
                         }
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
-                        if client.try_ack(&p).is_err(){events.clean();}
+                        if client.try_ack(&p).is_err(){console.set_mqtt_connected(false, &tinyml);events.clean();}
                     }
                     Ok(_) => {}
-                    Err(_) => {
-                        tracing::warn!("Console MQTT connection lost; retrying");
+                    Err(error) => {
+                        console.set_mqtt_connected(false, &tinyml);
+                        pending_subscriptions = 0;
+                        tracing::warn!(%error, "Console MQTT connection lost; retrying");
                         tokio::time::sleep(Duration::from_secs(5)).await;
                     }
                 }
@@ -369,5 +437,35 @@ mod tests {
             console.accept("devices/node/logs", payload).await;
         }
         assert_eq!(console.history.lock().await["node"].len(), 200);
+    }
+
+    #[tokio::test]
+    async fn broker_state_changes_notify_reporting_without_duplicate_events() {
+        let temp = tempfile::tempdir().expect("test directory");
+        let storage = crate::storage::Storage::connect(&format!(
+            "sqlite:{}?mode=rwc",
+            temp.path().join("test.db").display()
+        ))
+        .await
+        .expect("database");
+        let tinyml = crate::tinyml::TinyMl::new(
+            &storage,
+            crate::tinyml::Settings {
+                enabled: true,
+                prefix: "tinyml/v1".into(),
+                max_bytes: 65536,
+                timeout_seconds: 300,
+            },
+        );
+        let console = Console::for_test("a".repeat(64));
+        let mut events = tinyml.events.subscribe();
+        assert!(!console.mqtt_connected());
+        console.set_mqtt_connected(true, &tinyml);
+        assert!(console.mqtt_connected());
+        assert_eq!(events.try_recv().expect("connection event")["connected"], true);
+        console.set_mqtt_connected(true, &tinyml);
+        assert!(events.try_recv().is_err());
+        console.set_mqtt_connected(false, &tinyml);
+        assert_eq!(events.try_recv().expect("disconnection event")["connected"], false);
     }
 }

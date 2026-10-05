@@ -6,6 +6,8 @@ use std::{
 
 use crate::errors::{ApiError, ApiResult};
 
+mod database;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub console_only: bool,
@@ -183,13 +185,11 @@ impl Config {
             })
     }
 
-    pub fn database_url(&self) -> String {
-        if let Ok(url) = env::var("DATABASE_URL") {
-            return url;
-        }
-        format!(
-            "sqlite://{}?mode=rwc",
-            self.data_dir.join("ota.db").to_string_lossy()
+    pub fn database_url(&self) -> ApiResult<String> {
+        database::resolve_database_url(
+            &self.data_dir,
+            env::var("DB_BACKEND").ok().as_deref(),
+            env::var("DATABASE_URL").ok().as_deref(),
         )
     }
 }

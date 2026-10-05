@@ -10,6 +10,7 @@ Flask backend for CSV Profiler
 """
 
 import json
+import os
 import uuid
 import queue
 import threading
@@ -264,6 +265,22 @@ def refresh_dataset_report(job_id: str, df: pd.DataFrame) -> dict:
 @app.route("/")
 def index():
     return send_file(WEB_DIR / "index.html")
+
+
+@app.route("/app-config.js")
+def app_config():
+    """Expose only browser-safe API URLs; never include credentials from .env."""
+    host = request.host.split(":", 1)[0].lower()
+    public_host = os.getenv("APP_PUBLIC_FRONTEND_HOST", "").strip().lower()
+    local_api = os.getenv("APP_LOCAL_OTA_API_BASE_URL", "").strip() or (
+        "http://localhost:8080" if os.getenv("CSV_PORT") == "5173" else "http://localhost:7000"
+    )
+    public_api = os.getenv("APP_PUBLIC_OTA_API_BASE_URL", "").strip()
+    ota_api = public_api if public_host and host == public_host and public_api else local_api
+    payload = json.dumps({"otaApiBase": ota_api})
+    response = Response(f"window.APP_CONFIG = Object.freeze({payload});\n", mimetype="text/javascript")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/upload", methods=["POST"])
@@ -702,7 +719,9 @@ def reset_all():
 # Entry point
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
+    csv_host = os.getenv("CSV_BIND_ADDRESS", "0.0.0.0")
+    csv_port = int(os.getenv("CSV_PORT", "5000"))
     print("=" * 55)
-    print("  CSV Profiler Server  —  http://localhost:5000")
+    print(f"  CSV Profiler Server  —  http://localhost:{csv_port}")
     print("=" * 55)
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host=csv_host, port=csv_port, debug=False, threaded=True)

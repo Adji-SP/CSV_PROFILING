@@ -182,6 +182,9 @@ async fn console_auth_history_live_and_isolation() {
             .expect("response");
         response
     }
+    let health = get(address, "/health", None).await;
+    assert!(health.starts_with("HTTP/1.1 200"));
+    assert!(health.contains("\"service\":\"csv-profiling-api\""));
     assert!(
         get(address, "/api/tinyml/status", None)
             .await
