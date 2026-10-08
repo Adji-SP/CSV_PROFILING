@@ -1,4 +1,4 @@
-# Remote console and Azure SQL storage
+# Remote console and Azure PostgreSQL storage
 
 The ESP32 can be far away from your laptop. As long as it has Internet access,
 it can send application logs to an MQTT broker. Your browser receives those
@@ -22,8 +22,8 @@ flowchart LR
 
 ## What works locally first
 
-Leave `DATABASE_URL`, `MQTT_HOST` and the device MQTT settings unset to retain
-SQLite and USB-only firmware logging. Flask CSV routes and OTA routes remain separate.
+Use `DB_BACKEND=sqlite` with `DATABASE_URL` unset for local storage. Leave
+`MQTT_HOST` and device MQTT settings unset if you want USB-only logging. Flask CSV routes and OTA routes remain separate.
 Start with `run-dev.bat` on Windows or `run-dev.sh` on Linux/macOS.
 
 For the remote console, you need a TLS MQTT broker and separate broker identities:
@@ -68,20 +68,12 @@ changing configuration. A short/missing viewer token prevents MQTT startup.
 Device settings are **compile-time** values. Editing `.env` cannot change firmware
 already running on the ESP32. Rebuild and flash, or install a rebuilt image through OTA.
 
-For a direct PowerShell firmware build, set environment variables before invoking
-`flash-esp32.ps1`. That script does not load these MQTT settings from `.env` itself:
-
-```powershell
-$env:DEVICE_ID = 'ESP32-S3-001'
-$env:DEVICE_MQTT_URL = 'mqtts://your-broker-dns-name:8883'
-$env:DEVICE_MQTT_USERNAME = 'ESP32-S3-001'
-# Only for a private broker CA:
-$env:DEVICE_MQTT_CA_PEM = Get-Content -Raw 'D:/certs/broker-root.pem'
-# For mutual TLS:
-$env:DEVICE_MQTT_CERT_PEM = Get-Content -Raw 'D:/certs/device-001.pem'
-$env:DEVICE_MQTT_KEY_PEM = Get-Content -Raw 'D:/certs/device-001-key.pem'
-./flash-esp32.ps1 -BuildOnly
-```
+The root .env is loaded by flash-esp32.ps1 and by the Rust server for managed
+dashboard builds. Explicit flash-helper command arguments override file settings.
+See [the step-by-step MQTT guide](MQTT_SETUP.md) for account setup. Prefer
+DEVICE_MQTT_CA_FILE over pasting multiline certificates; the build helpers load
+that file into DEVICE_MQTT_CA_PEM for compilation. The same FILE/PEM options
+exist for client certificates/keys when using mutual TLS.
 
 Use the helper's normal flash workflow when ready. For dashboard builds, the Rust
 server loads the root `.env` and build commands inherit those device settings;
@@ -106,8 +98,8 @@ time checks; ensure the device network permits DNS, NTP and outbound MQTT TLS.
 ### 3. Open the console
 
 The device must already be registered in the same database used by the console server.
-Open **Remote Console**, enter the viewer token, click **Refresh devices**, choose
-the board and **Connect**. There are level/text filters, pause, auto-scroll and NDJSON
+Unlock **Monitoring** once with the viewer token, then open **Remote Console**,
+choose a registered board and connect its stream. There are level/text filters, pause, auto-scroll and NDJSON
 download controls. Reconnect explicitly after a network interruption.
 
 Tokens are not placed in URLs or local storage. Use HTTPS/WSS outside localhost;
@@ -119,7 +111,13 @@ Both are SQL databases, but they are different products. This implementation sup
 **SQLite and PostgreSQL**. It does not support Microsoft SQL Server/T-SQL or Cosmos DB.
 For Azure, choose **Azure Database for PostgreSQL Flexible Server**.
 
+PostgreSQL is enabled and tested against a disposable PostgreSQL instance.
+Set `DB_BACKEND=postgres` together with the connection URL. See
+[database setup](DATABASE_SETUP.md) for selection, backups and test commands.
+A real Azure deployment still needs its own credentials/network/TLS validation.
+
 ```dotenv
+DB_BACKEND=postgres
 DATABASE_URL=postgres://ota_user:URL_ENCODED_PASSWORD@your-server.postgres.database.azure.com:5432/ota?sslmode=verify-full
 ```
 
@@ -128,8 +126,8 @@ and authorized development machines. Configure the current Azure root CA chain i
 needed with the PostgreSQL connection option `sslrootcert`; do not disable verification
 to work around certificate errors. See [Azure PostgreSQL TLS guidance](https://learn.microsoft.com/en-us/azure/postgresql/security/security-tls-how-to-connect).
 
-The schema lives in `ota-server/migrations/001_initial.sql`. On startup the service
-applies version 1 transactionally and records it in `schema_versions`. It adopts the
+The schemas live in `ota-server/migrations/001_initial.sql` and `002_tinyml.sql`.
+On startup the service applies pending versions transactionally and records it in `schema_versions`. It adopts the
 existing SQLite tables without dropping them. Start one instance for migration before
 starting other processes. Back up existing databases first.
 
@@ -169,8 +167,8 @@ ready. Test certificate expiry/revocation and rotate credentials using your prov
 
 ## Hosting the viewer safely
 
-Set `OTA_CONSOLE_ONLY=true` on a hosted instance. That mounts only status and the two
-authenticated console endpoints; it does **not** expose project upload, builds,
+Set `OTA_CONSOLE_ONLY=true` on a hosted instance. That mounts health/status and authenticated
+Monitoring endpoints (Reporting and Remote Console); it does **not** expose project upload, builds,
 deployment, firmware download or device registration. Register devices through the
 private/local full service using the same PostgreSQL database. The public viewer
 does not make existing LAN-only OTA URLs work over the Internet.
@@ -222,10 +220,15 @@ per-tenant authorization becomes a requirement.
 | Cargo manifests and lockfiles | SQL, WebSocket, MQTT/TLS and firmware JSON dependencies |
 | `.env.example`, `deploy/console.nginx.conf`, `README.md`, this guide | Configuration, proxy example and operating instructions |
 
-Verified during implementation: backend unit/integration tests (including a temporary
-SQLite database and loopback WebSocket server), JavaScript syntax checks, and ESP32-S3
-firmware `cargo check --release --target xtensa-esp32s3-espidf`. The firmware check still
-reports upstream ESP-IDF macro configuration warnings. It is not a hardware test.
-PostgreSQL integration is an explicitly ignored opt-in test until a disposable database
-is supplied. Real MQTT/TLS, Azure deployment and physical ESP32 log delivery remain
-to be verified with provisioned credentials and hardware.
+Verification: backend tests cover SQLite storage, OTA lifecycle, authenticated
+loopback WebSockets, and TinyML reports. Both opt-in PostgreSQL tests passed on a
+disposable PostgreSQL 17.11 instance. Local real-broker probes passed backend/device
+TLS authentication, subscriptions, device publish delivery, and loopback WebSocket
+publish-to-TLS delivery. Browser scripts pass syntax checks and the launcher smoke
+test starts/stops Flask and Rust successfully.
+
+These are not physical ESP32, public Cloudflare WSS, or Azure deployment tests.
+The updated ESP32-S3 example also passed a release build and generated a non-merged
+OTA image; no board was flashed. Public WSS and device-side delivery still require
+hardware validation. See [verification results](SETUP_VERIFICATION.md).
+Do not interpret a successful local probe as a successful board flash.

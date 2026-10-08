@@ -14,9 +14,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wifi_manager::WifiManager;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OtaConfig {
     pub server_url: String,
+    // Provisioned independently of the dashboard password. Never log this value.
+    pub device_token: String,
     pub device_id: String,
     pub device_name: String,
     pub chip: String,
@@ -160,6 +162,10 @@ fn run_cycle(
 }
 
 fn validate_config(config: &OtaConfig) -> Result<()> {
+    if !config.device_token.is_empty() {
+        ensure!(config.server_url.starts_with("https://"), "Device credentials require an HTTPS OTA server URL");
+        ensure!(config.device_token.len() >= 32 && config.device_token.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)), "Invalid DEVICE_OTA_TOKEN format");
+    }
     if config.server_url.contains("localhost") || config.server_url.contains("127.0.0.1") {
         bail!("OTA server URL must use the dashboard PC's LAN address, not localhost");
     }
@@ -191,6 +197,7 @@ fn register(
 ) -> Result<()> {
     post_json(
         client,
+        config,
         &format!("{}/api/ota/devices/register", config.server_url),
         &RegisterRequest {
             device_id: &config.device_id,
@@ -209,6 +216,7 @@ fn heartbeat(
 ) -> Result<()> {
     post_json(
         client,
+        config,
         &format!(
             "{}/api/ota/devices/{}/heartbeat",
             config.server_url, config.device_id
@@ -229,7 +237,10 @@ fn get_update(
         "{}/api/ota/devices/{}/update",
         config.server_url, config.device_id
     );
-    let request = client.request(Method::Get, &url, &[("accept", "application/json")])?;
+    let authorization = format!("Bearer {}", config.device_token);
+    let mut headers = vec![("accept", "application/json")];
+    if !config.device_token.is_empty() { headers.push(("authorization", authorization.as_str())); }
+    let request = client.request(Method::Get, &url, &headers)?;
     let mut response = request.submit()?;
     if response.status() != 200 {
         bail!("Update endpoint returned HTTP {}", response.status());
@@ -274,12 +285,17 @@ fn apply_update(
         .download_url
         .as_deref()
         .context("missing download URL")?;
+    ensure!(download_url == format!("{}/api/ota/firmware/{firmware_id}/download", config.server_url),
+            "Firmware download must use the configured OTA server and expected path");
     info!("Downloading firmware {firmware_id} v{target_version} ({expected_size} bytes)");
 
+    let authorization = format!("Bearer {}", config.device_token);
+    let mut headers = vec![("accept", "application/octet-stream")];
+    if !config.device_token.is_empty() { headers.push(("authorization", authorization.as_str())); }
     let request = download_client.request(
         Method::Get,
         download_url,
-        &[("accept", "application/octet-stream")],
+        &headers,
     )?;
     let mut response = request.submit()?;
     if response.status() != 200 {
@@ -348,6 +364,7 @@ fn report_ota_status(
 ) -> Result<()> {
     post_json(
         client,
+        config,
         &format!(
             "{}/api/ota/devices/{}/ota-status",
             config.server_url, config.device_id
@@ -363,15 +380,18 @@ fn report_ota_status(
 
 fn post_json<T: Serialize>(
     client: &mut HttpClient<EspHttpConnection>,
+    config: &OtaConfig,
     url: &str,
     body: &T,
 ) -> Result<()> {
     let payload = serde_json::to_vec(body)?;
     let content_length = payload.len().to_string();
-    let headers = [
+    let authorization = format!("Bearer {}", config.device_token);
+    let mut headers = vec![
         ("content-type", "application/json"),
         ("content-length", content_length.as_str()),
     ];
+    if !config.device_token.is_empty() { headers.push(("authorization", authorization.as_str())); }
     let mut request = client.post(url, &headers)?;
     request.write_all(&payload)?;
     request.flush()?;

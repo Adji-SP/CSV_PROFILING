@@ -12,14 +12,18 @@ mod tinyml;
 
 use std::sync::Arc;
 
-use axum::{Router, extract::DefaultBodyLimit, http::HeaderValue};
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    http::{HeaderValue, Method, header},
+};
 use config::Config;
 use errors::{ApiError, ApiResult};
 use services::{BuildCoordinator, LocalFirmwareBuilder};
 use state::AppState;
 use storage::Storage;
 use tower_http::{
-    cors::{AllowOrigin, Any, CorsLayer},
+    cors::{AllowOrigin, CorsLayer},
     trace::TraceLayer,
 };
 use tracing_subscriber::EnvFilter;
@@ -53,13 +57,15 @@ async fn main() -> ApiResult<()> {
     let tinyml = tinyml::TinyMl::new(&storage, tinyml::Settings::load()?);
     let (shutdown_sender, shutdown) = tokio::sync::watch::channel(false);
     tinyml.start(shutdown.clone());
-    console.start_mqtt(tinyml.clone(), shutdown).map_err(|error| {
-        ApiError::internal(
-            "CONSOLE_CONFIG",
-            "Invalid MQTT console configuration; check broker credentials and TLS files",
-        )
-        .with_details(error.to_string())
-    })?;
+    console
+        .start_mqtt(tinyml.clone(), shutdown)
+        .map_err(|error| {
+            ApiError::internal(
+                "CONSOLE_CONFIG",
+                "Invalid MQTT console configuration; check broker credentials and TLS files",
+            )
+            .with_details(error.to_string())
+        })?;
     let state = AppState {
         tinyml,
         console,
@@ -121,8 +127,11 @@ async fn main() -> ApiResult<()> {
 }
 
 fn cors_layer(config: &Config) -> ApiResult<CorsLayer> {
-    let origins = config
-        .allowed_origins
+    cors_for_origins(&config.allowed_origins)
+}
+
+fn cors_for_origins(allowed: &[String]) -> ApiResult<CorsLayer> {
+    let origins = allowed
         .iter()
         .map(|origin| {
             origin.parse::<HeaderValue>().map_err(|error| {
@@ -135,6 +144,57 @@ fn cors_layer(config: &Config) -> ApiResult<CorsLayer> {
         .collect::<ApiResult<Vec<_>>>()?;
     Ok(CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods(Any)
-        .allow_headers(Any))
+        .allow_credentials(true)
+        .allow_methods([
+            Method::GET,
+            Method::HEAD,
+            Method::POST,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT]))
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::*;
+    use axum::{body::Body, http::Request, routing::get};
+    use tower::ServiceExt;
+    #[tokio::test]
+    async fn access_cookies_only_with_allowlisted_origins() {
+        let app = Router::new()
+            .route("/probe", get(|| async { "ok" }))
+            .layer(cors_for_origins(&["https://dev.example.test".into()]).unwrap());
+        for origin in ["https://dev.example.test", "https://untrusted.example.test"] {
+            let request = Request::builder()
+                .method("OPTIONS")
+                .uri("/probe")
+                .header(header::ORIGIN, origin)
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .header(
+                    header::ACCESS_CONTROL_REQUEST_HEADERS,
+                    "authorization,content-type",
+                )
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            if origin == "https://dev.example.test" {
+                assert_eq!(
+                    response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                    origin
+                );
+                assert_eq!(
+                    response.headers()[header::ACCESS_CONTROL_ALLOW_CREDENTIALS],
+                    "true"
+                );
+            } else {
+                assert!(
+                    response
+                        .headers()
+                        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                        .is_none()
+                );
+            }
+        }
+    }
 }

@@ -18,6 +18,10 @@ param(
     [string] $MosquittoDir,
     [ValidateRange(1,65535)][int] $Port = 8883,
     [switch] $RenewCertificate,
+    [switch] $ConfigureProject,
+    [switch] $EnableWebSockets,
+    [ValidateRange(1,65535)][int] $WebSocketPort = 9001,
+    [string] $PythonPath,
     [switch] $StartBroker,
     [switch] $CheckOnly
 )
@@ -50,6 +54,14 @@ if ($CheckOnly) {
     Write-Host 'Prerequisites found. No certificates, accounts or listeners changed.'
     return
 }
+# Refuse before touching credentials/certificates if a broker already owns a requested port.
+foreach ($listenPort in @($Port) + $(if ($EnableWebSockets) { @($WebSocketPort) } else { @() })) {
+    $probe = New-Object Net.Sockets.TcpClient
+    try { $occupied = $probe.ConnectAsync('127.0.0.1', $listenPort).Wait(1000) -and $probe.Connected }
+    catch { $occupied = $false }
+    finally { $probe.Dispose() }
+    if ($occupied) { throw "Port $listenPort is already in use. Stop the intended MQTT broker before changing its configuration; nothing was changed." }
+}
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 # The private keys, hashed password file and backups must not be accessible to other ordinary users.
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -60,7 +72,9 @@ foreach ($sid in @($identity, (New-Object Security.Principal.SecurityIdentifier 
     $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
     $acl.AddAccessRule($rule)
 }
-Set-Acl -LiteralPath $DataDir -AclObject $acl
+# Persist only the access rules modified above. PowerShell 5.1 Set-Acl can
+# request SACL/audit privileges when given a new security descriptor.
+[IO.Directory]::SetAccessControl($DataDir, $acl)
 $utf8 = New-Object Text.UTF8Encoding($false)
 $backup = Join-Path $DataDir ('backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $backup | Out-Null
@@ -69,8 +83,12 @@ foreach ($name in @('ca.crt','ca.key','server.crt','server.key','passwords','acl
     if (Test-Path -LiteralPath $file -PathType Leaf) { Copy-Item -LiteralPath $file -Destination (Join-Path $backup $name) }
 }
 function Invoke-OpenSsl([string[]] $Arguments) {
-    & $openssl @Arguments 2>&1 | ForEach-Object { Write-Verbose ([string] $_) }
-    if ($LASTEXITCODE -ne 0) { throw 'OpenSSL failed. Existing files are backed up; no credentials were displayed.' }
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $openssl @Arguments 2>&1 | ForEach-Object { Write-Verbose ([string] $_) }
+        if ($LASTEXITCODE -ne 0) { throw 'OpenSSL failed. Existing files are backed up; no credentials were displayed.' }
+    } finally { $ErrorActionPreference = $previousPreference }
 }
 $ca = Join-Path $DataDir 'ca.crt'
 $caKey = Join-Path $DataDir 'ca.key'
@@ -105,6 +123,11 @@ if ($RenewCertificate -or -not (Test-Path -LiteralPath $serverCert) -or -not (Te
     Write-Host 'Keeping existing server certificate. Use -RenewCertificate if its address/expiry is wrong.'
 }
 $passwordFile = Join-Path $DataDir 'passwords'
+if ($ConfigureProject) {
+    if (-not $PythonPath) { $PythonPath = (Get-Command python.exe -ErrorAction Stop).Source }
+    & $PythonPath (Join-Path $PSScriptRoot 'provision-mqtt.py') --root (Split-Path $PSScriptRoot) --data-dir $DataDir --passwd-tool $passwd --device-id $DeviceId --address $BrokerAddress --port $Port
+    if ($LASTEXITCODE -ne 0) { throw 'Could not provision the project MQTT credentials. Review the setting-specific error; no secret was printed.' }
+}
 foreach ($user in @('console-backend', $DeviceId)) {
     $exists = (Test-Path -LiteralPath $passwordFile) -and
         (@(Get-Content -LiteralPath $passwordFile | Where-Object { $_.StartsWith($user + ':') }).Count -gt 0)
@@ -138,6 +161,11 @@ keyfile $configDir/server.key
 tls_version tlsv1.2
 log_dest stdout
 "@
+if ($EnableWebSockets) {
+    if ($WebSocketPort -eq $Port) { throw 'TLS and WebSocket listeners need distinct ports.' }
+    # cloudflared terminates public TLS. Never bind this plaintext WS origin to LAN.
+    $configText += "`nlistener $WebSocketPort 127.0.0.1`nprotocol websockets`n"
+}
 [IO.File]::WriteAllText($config, $configText + "`n", $utf8)
 Write-Host "Prepared $config"
 Write-Host "Backup retained at $backup. No original configuration or accounts were deleted."
@@ -152,5 +180,8 @@ if ($StartBroker) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $process = Start-Process -FilePath $broker -ArgumentList @('-c', ('"' + $config + '"')) -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $logDir "$stamp.out.log") -RedirectStandardError (Join-Path $logDir "$stamp.err.log")
+    Start-Sleep -Milliseconds 750
+    if ($process.HasExited) { throw "Broker exited with code $($process.ExitCode). Review $logDir; a Windows build without WebSocket support must omit -EnableWebSockets." }
     Write-Host "Broker process started (PID $($process.Id)); logs: $logDir"
+    [IO.File]::WriteAllText((Join-Path $DataDir 'dashboard-broker.pid'), [string]$process.Id, $utf8)
 }

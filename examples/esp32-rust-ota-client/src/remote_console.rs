@@ -76,12 +76,12 @@ pub fn initialize() -> anyhow::Result<()> {
         return Ok(());
     };
     anyhow::ensure!(
-        url.starts_with("mqtts://"),
-        "Remote console requires MQTT over TLS"
+        url.starts_with("mqtts://") || url.starts_with("wss://"),
+        "Remote console requires mqtts:// or wss:// (encrypted MQTT)"
     );
     anyhow::ensure!(
-        option_env!("DEVICE_MQTT_CERT_PEM").is_some()
-            == option_env!("DEVICE_MQTT_KEY_PEM").is_some(),
+        option_env!("DEVICE_MQTT_CERT_PEM").filter(|v| !v.trim().is_empty()).is_some()
+            == option_env!("DEVICE_MQTT_KEY_PEM").filter(|v| !v.trim().is_empty()).is_some(),
         "Provide MQTT client certificate and private key together"
     );
     // Provision a distinct identity and broker ACL for each board.
@@ -97,14 +97,21 @@ pub fn initialize() -> anyhow::Result<()> {
                 .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)),
         "Invalid DEVICE_ID"
     );
+    let private_ca = option_env!("DEVICE_MQTT_CA_PEM").filter(|v| !v.trim().is_empty());
     let config = MqttClientConfiguration {
         client_id: Some(id),
         username: Some(username),
         password: option_env!("DEVICE_MQTT_PASSWORD"),
-        server_certificate: certificate(option_env!("DEVICE_MQTT_CA_PEM")),
+        server_certificate: certificate(private_ca),
         client_certificate: certificate(option_env!("DEVICE_MQTT_CERT_PEM")),
         private_key: certificate(option_env!("DEVICE_MQTT_KEY_PEM")),
-        crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
+        // ESP-IDF prioritizes the bundle over cacert_buf. A local broker must
+        // use its private CA exclusively; public WSS uses the bundle instead.
+        crt_bundle_attach: if private_ca.is_none() {
+            Some(esp_idf_svc::sys::esp_crt_bundle_attach)
+        } else {
+            None
+        },
         network_timeout: Duration::from_secs(5),
         outbox_limit: Some(8192),
         ..Default::default()

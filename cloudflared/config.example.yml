@@ -7,6 +7,20 @@ credentials-file: C:\Users\YOUR_USERNAME\.cloudflared\YOUR_TUNNEL_UUID.json
 ingress:
   - hostname: dev.iot-prototype.net
     service: http://127.0.0.1:5173
+    originRequest:
+      access:
+        required: true
+        teamName: YOUR_ACCESS_TEAM
+        aud: [YOUR_DASHBOARD_ACCESS_AUDIENCE]
   - hostname: api-dev.iot-prototype.net
     service: http://127.0.0.1:18080
+    originRequest:
+      access:
+        required: true
+        teamName: YOUR_ACCESS_TEAM
+        aud: [YOUR_API_ACCESS_AUDIENCE]
+  # Broker login/ACL protects MQTT. Interactive Access login cannot be used by MQTT clients.
+  # Enable only after setup-mqtt.ps1 -EnableWebSockets, with strong per-device passwords.
+  - hostname: mqtt.iot-prototype.net
+    service: http://127.0.0.1:9001
   - service: http_status:404

@@ -90,6 +90,7 @@ struct ManagedFirmwareEnvironment {
     wifi_password: Option<String>,
     device_name: Option<String>,
     device_id: Option<String>,
+    device_ota_token: Option<String>,
 }
 
 impl ManagedFirmwareEnvironment {
@@ -99,6 +100,7 @@ impl ManagedFirmwareEnvironment {
             wifi_password: nonempty_env("WIFI_PASS"),
             device_name: nonempty_env("DEVICE_NAME"),
             device_id: nonempty_env("DEVICE_ID"),
+            device_ota_token: nonempty_env("DEVICE_OTA_TOKEN"),
         }
     }
 
@@ -116,8 +118,54 @@ impl ManagedFirmwareEnvironment {
         if let Some(device_id) = self.device_id.as_deref() {
             command.env("DEVICE_ID", device_id);
         }
+        if let Some(token) = self.device_ota_token.as_deref() {
+            command.env("DEVICE_OTA_TOKEN", token);
+        }
+        apply_device_certificates(command)?;
         Ok(())
     }
+}
+
+fn apply_device_certificates(command: &mut Command) -> Result<(), BuildFailure> {
+    for kind in ["CA", "CERT", "KEY"] {
+        let file_setting = format!("DEVICE_MQTT_{kind}_FILE");
+        let pem_setting = format!("DEVICE_MQTT_{kind}_PEM");
+        if let Some(file) = nonempty_env(&file_setting) {
+            if nonempty_env(&pem_setting).is_some() {
+                return Err(BuildFailure::new(format!(
+                    "Set either {file_setting} or {pem_setting}, not both"
+                )));
+            }
+            let path = PathBuf::from(file);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)
+            };
+            let metadata = std::fs::metadata(&path).map_err(|_| {
+                BuildFailure::new(format!("{file_setting} is missing or unreadable"))
+            })?;
+            if !metadata.is_file() || metadata.len() > 65536 {
+                return Err(BuildFailure::new(format!(
+                    "{file_setting} must be a PEM file of at most 64 KiB"
+                )));
+            }
+            let pem = std::fs::read_to_string(path)
+                .map_err(|_| BuildFailure::new(format!("{file_setting} is not readable UTF-8")))?;
+            let marker = if kind == "KEY" {
+                "PRIVATE KEY-----"
+            } else {
+                "-----BEGIN CERTIFICATE-----"
+            };
+            if !pem.contains(marker) || pem.contains('\0') {
+                return Err(BuildFailure::new(format!(
+                    "{file_setting} is not the expected PEM certificate/key"
+                )));
+            }
+            command.env(pem_setting, pem);
+        }
+    }
+    Ok(())
 }
 
 fn nonempty_env(name: &str) -> Option<String> {
@@ -333,10 +381,7 @@ impl FirmwareBuilder for LocalFirmwareBuilder {
         }
         self.apply_esp_idf_environment(&mut cargo)?;
         if let Some(directory) = self.esp_idf_tools_dir.as_ref() {
-            let _ = logs.send(format!(
-                "ESP-IDF tools directory: {}",
-                directory.display()
-            ));
+            let _ = logs.send(format!("ESP-IDF tools directory: {}", directory.display()));
         }
         if self.python_path.is_some() {
             let _ = logs.send("Configured base Python added to the build PATH".to_owned());
@@ -527,7 +572,10 @@ fn same_manifest(candidate: &Path, expected: &Path) -> bool {
     }
 }
 
-async fn select_elf(release_dir: &Path, mut artifacts: Vec<PathBuf>) -> Result<PathBuf, BuildFailure> {
+async fn select_elf(
+    release_dir: &Path,
+    mut artifacts: Vec<PathBuf>,
+) -> Result<PathBuf, BuildFailure> {
     artifacts.sort();
     artifacts.dedup();
     if artifacts.len() != 1 {
@@ -545,22 +593,29 @@ async fn select_elf(release_dir: &Path, mut artifacts: Vec<PathBuf>) -> Result<P
         });
     }
     let path = artifacts.pop().expect("one artifact was checked above");
-    let canonical_release = tokio::fs::canonicalize(release_dir).await.map_err(|error| BuildFailure {
-        message: "Cargo succeeded but the target release directory was not found".to_owned(),
-        details: Some(error.to_string()),
-        exit_code: Some(0),
-    })?;
-    let canonical_path = tokio::fs::canonicalize(&path).await.map_err(|error| BuildFailure {
-        message: "Cargo reported an executable that does not exist".to_owned(),
-        details: Some(error.to_string()),
-        exit_code: Some(0),
-    })?;
-    let metadata = tokio::fs::metadata(&canonical_path).await.map_err(|error| BuildFailure {
-        message: "Could not inspect the Cargo executable".to_owned(),
-        details: Some(error.to_string()),
-        exit_code: Some(0),
-    })?;
-    if !canonical_path.starts_with(&canonical_release) || !metadata.is_file() || metadata.len() == 0 {
+    let canonical_release = tokio::fs::canonicalize(release_dir)
+        .await
+        .map_err(|error| BuildFailure {
+            message: "Cargo succeeded but the target release directory was not found".to_owned(),
+            details: Some(error.to_string()),
+            exit_code: Some(0),
+        })?;
+    let canonical_path = tokio::fs::canonicalize(&path)
+        .await
+        .map_err(|error| BuildFailure {
+            message: "Cargo reported an executable that does not exist".to_owned(),
+            details: Some(error.to_string()),
+            exit_code: Some(0),
+        })?;
+    let metadata = tokio::fs::metadata(&canonical_path)
+        .await
+        .map_err(|error| BuildFailure {
+            message: "Could not inspect the Cargo executable".to_owned(),
+            details: Some(error.to_string()),
+            exit_code: Some(0),
+        })?;
+    if !canonical_path.starts_with(&canonical_release) || !metadata.is_file() || metadata.len() == 0
+    {
         return Err(BuildFailure::new(
             "Cargo executable is empty or outside the configured target release directory",
         ));
@@ -636,7 +691,10 @@ mod tests {
         let selected = select_elf(&release, vec![current.clone()])
             .await
             .expect("reported ELF should be selected");
-        assert_eq!(selected, current.canonicalize().expect("canonical current ELF"));
+        assert_eq!(
+            selected,
+            current.canonicalize().expect("canonical current ELF")
+        );
         assert!(select_elf(&release, vec![]).await.is_err());
         assert!(select_elf(&release, vec![current, stale]).await.is_err());
     }

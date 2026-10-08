@@ -80,7 +80,9 @@ try {
     $vsPath = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if ($LASTEXITCODE -ne 0 -or -not $vsPath) { throw 'No complete Visual Studio C++ toolchain found.' }
     $env:PATH = (Split-Path $vswhere) + ';' + $env:PATH
-    & (Join-Path $vsPath 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+    Invoke-WithSingleLineEnvironment {
+        & (Join-Path $vsPath 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+    }
 
     $espExport = Join-Path $env:USERPROFILE 'export-esp.ps1'
     if (-not (Test-Path -LiteralPath $espExport)) { throw 'ESP Rust environment missing. Install it with espup first (export-esp.ps1 is required).' }
@@ -138,12 +140,7 @@ try {
     $env:DEVICE_NAME = $DeviceName
     $env:FIRMWARE_VERSION = $Version
     if ($env:DEVICE_MQTT_URL) {
-        $mqttUri = $null
-        if (-not [Uri]::TryCreate($env:DEVICE_MQTT_URL, [UriKind]::Absolute, [ref] $mqttUri) -or
-            $mqttUri.Scheme -ne 'mqtts' -or $mqttUri.IsLoopback -or $mqttUri.UserInfo -or
-            $mqttUri.Query -or $mqttUri.Fragment -or $mqttUri.AbsolutePath -ne '/') {
-            throw 'DEVICE_MQTT_URL must be mqtts://broker-host:8883 with no embedded credentials; never localhost on an ESP32.'
-        }
+        Assert-DeviceMqttUrl $env:DEVICE_MQTT_URL
         if (-not $env:DEVICE_ID -or -not $env:DEVICE_MQTT_USERNAME) {
             throw 'DEVICE_ID and DEVICE_MQTT_USERNAME are required when MQTT is enabled.'
         }

@@ -335,7 +335,7 @@ function showSection(id, activeNav = null) {
   const monitoring = id === "console-section" || id === "tinyml-section";
   const accessPanel = document.getElementById("viewer-access-panel");
   if (monitoring) document.getElementById(id).querySelector(".page-title, .tml-page-head").after(accessPanel);
-  accessPanel.classList.toggle("hidden", !monitoring);
+  accessPanel.classList.toggle("hidden", !monitoring || !!window.APP_CONFIG?.loginSession);
   newAnalysisBtn.style.display = id === "report-section" ? "inline-block" : "none";
   const sectionMeta = {
     "upload-section":   { nav: activeNav || "profiler", title: activeNav === "runs" ? "CSV Runs" : "CSV Profiler" },

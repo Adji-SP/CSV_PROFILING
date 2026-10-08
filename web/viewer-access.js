@@ -1,11 +1,18 @@
 /* One authenticated, in-memory viewer session for both Monitoring views. */
 (() => {
-  let token = "";
+  const loginSession = !!window.APP_CONFIG?.loginSession;
+  let token = loginSession ? "browser-session" : "";
   let attempt = 0;
   const listeners = new Set();
   const el = id => document.getElementById(`viewer-access-${id}`);
   function notify() { for (const listener of listeners) listener(); }
   function render(message) {
+    if (loginSession) {
+      el("form").closest(".viewer-access-panel")?.classList.add("hidden");
+      el("form").closest(".viewer-access-panel")?.setAttribute("hidden", "");
+      el("form").classList.add("hidden");
+      return;
+    }
     const connected = !!token;
     el("token").disabled = connected;
     el("connect").disabled = connected || !el("token").value.trim();
@@ -27,6 +34,7 @@
       el("status").textContent = "Checking viewer access…";
       try {
         const response = await fetch(`${OTA_API_BASE}/api/ota/console/devices`, {
+          credentials: "include",
           headers: {Authorization: `Bearer ${candidate}`},
         });
         if (current !== attempt) return false;
@@ -45,6 +53,7 @@
       }
     },
     clear() {
+      if (loginSession) return;
       ++attempt;
       if (!token) { el("token").value = ""; render(); return; }
       token = "";
@@ -54,6 +63,7 @@
     },
     subscribe(listener) {
       listeners.add(listener);
+      if (loginSession) queueMicrotask(listener);
       return () => listeners.delete(listener);
     },
   });

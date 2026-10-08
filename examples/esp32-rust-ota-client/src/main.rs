@@ -90,6 +90,7 @@ fn main() -> Result<()> {
 
     let ota_config = OtaConfig {
         server_url: OTA_SERVER_URL.trim_end_matches('/').to_owned(),
+        device_token: option_env!("DEVICE_OTA_TOKEN").unwrap_or("").to_owned(),
         device_id,
         device_name: DEVICE_NAME.to_owned(),
         chip: "esp32s3".to_owned(),

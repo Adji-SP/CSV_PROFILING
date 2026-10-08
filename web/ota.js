@@ -29,7 +29,7 @@ let otaSelectedProject = null;
 async function otaRequest(path, options = {}) {
   let response;
   try {
-    response = await fetch(`${OTA_API_BASE}${path}`, options);
+    response = await fetch(`${OTA_API_BASE}${path}`, { credentials: "include", ...options });
   } catch (error) {
     throw new Error(`Cannot reach the OTA backend at ${OTA_API_BASE}. Start the Rust server and check /api/ota/status.`);
   }

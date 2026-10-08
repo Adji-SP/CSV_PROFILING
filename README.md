@@ -6,19 +6,36 @@ This project keeps the existing Flask/Pandas CSV profiler and adds a separate Ru
 
 The dashboard now includes a read-only **Remote Console**: ESP32 Rust application logs
 travel over MQTT/TLS to Axum and then over WebSocket to the browser. SQLite remains the
-local default; `DATABASE_URL` optionally selects PostgreSQL, including Azure Database
+local default; `DB_BACKEND=postgres` with `DATABASE_URL` selects PostgreSQL, including Azure Database
 for PostgreSQL. This is not a Microsoft SQL Server driver.
 
 See [setup, device configuration, security boundaries and Azure instructions](docs/remote-console-azure.md).
-Cloud resources and live MQTT credentials are not provisioned automatically. Sensor
+Cloud resources are not provisioned automatically. The opt-in MQTT setup helper can
+generate local broker credentials and save them privately in .env. Sensor
 telemetry remains deferred. Set `OTA_CONSOLE_ONLY=true` for a hosted read-only service;
 never expose the trusted local firmware compiler publicly.
 
 For the opt-in Windows development setup with a named Cloudflare Tunnel, see
 [Cloudflare Tunnel setup](docs/CLOUDFLARE_DEV_SETUP.md). It serves the existing
-Flask dashboard on `:5173` and Rust API on `:8080`; the normal `:5000`/`:7000`
+Flask dashboard on `:5173` and Rust API on `:18080`; the normal `:5000`/`:7000`
 launchers remain unchanged. The guide explains public hostname routes, security,
 MQTT/WebSocket behavior, and verification.
+
+Start a configured Windows laptop with:
+
+```powershell
+.\scripts\dev.ps1 -WithMqtt -AllowLanDevices
+```
+
+The launcher prints the current LAN firmware URL with the matching API port.
+It does not update already-flashed devices. For setup and credential placement:
+
+- [MQTT: backend password, board password, and viewer token](docs/MQTT_SETUP.md)
+- [SQLite locally and Azure PostgreSQL](docs/DATABASE_SETUP.md)
+
+Local SQLite/PostgreSQL tests and real-broker TLS/WebSocket probes pass.
+Public Cloudflare routing, Azure credentials and physical ESP32 WSS still need
+environment-specific validation; local success is not proof of cloud deployment.
 
 ## Beginner handbook
 
@@ -138,6 +155,10 @@ CORS defaults to only `http://localhost:5000` and `http://127.0.0.1:5000`. Add s
 
 ## Run locally
 
+For public phone/browser access with an administrator login (no registration),
+use [the authenticated gateway setup](docs/PUBLIC_LOGIN.md) and
+`scripts/dev-public.ps1`. Public publishing must go through that gateway.
+
 Windows:
 
 ```bat
@@ -150,6 +171,40 @@ Linux/macOS:
 chmod +x run-dev.sh
 ./run-dev.sh
 ```
+
+### Fixed HTTPS address with Tailscale (Windows)
+
+Tailscale Serve gives this development dashboard one stable HTTPS address while
+keeping it private to your Tailscale network. The browser uses one hostname;
+Tailscale sends `/` to Flask on port 5173 and sends `/api/ota`, `/api/tinyml`,
+and `/health` to Axum on port 18080.
+
+After installing Tailscale and signing in, enable **Serve** once in the
+Tailscale admin page. Then run:
+
+```powershell
+# One time. This opens a Windows UAC prompt because Tailscale owns the routes.
+.\scripts\setup-tailscale-serve.ps1
+
+# Every development session.
+.\scripts\dev-tailscale.ps1 -AllowLanDevices
+```
+
+The script prints the exact resulting address, shaped like:
+
+```text
+https://csv-ota-dashboard.<your-tailnet>.ts.net
+```
+
+Only devices signed in to the same Tailscale network can open it. This is
+intentional: the OTA build API executes trusted uploaded Rust projects and is
+not yet suitable for anonymous public access. The ESP32 itself cannot join this
+tailnet, so `-AllowLanDevices` still advertises the current LAN address for
+firmware registration and downloads.
+
+If Tailscale reports that Serve is disabled, open the enable URL printed by the
+CLI, approve it once, and rerun `setup-tailscale-serve.ps1`. Do not point a
+quick tunnel at port 8080: this project has no service on that port.
 
 Or run separately:
 
@@ -245,7 +300,11 @@ Errors use a structured envelope:
 - Uploaded projects: `firmware-projects/<project UUID>/`
 - Firmware: `firmware-builds/firmware-<project>-v<version>-<build>.bin`
 
-Firmware paths are reconstructed inside `firmware-builds` and canonicalized before download/deletion. Firmware referenced by a device or deployment history is rejected with `409 Conflict` rather than silently orphaning records.
+Firmware paths are restricted to `firmware-builds`. Deletion rejects unsafe paths,
+symlinks, a device's current/desired image, and active deployments with `409 Conflict`.
+Completed historical deployments do not permanently block cleanup: the binary is
+removed while a deleted metadata record preserves history. Failed physical cleanup
+can be retried without making a partially deleted image available for deployment.
 
 Build requests reserve a project atomically, so a double-click cannot start two
 builds of the same upload. If the OTA server stops mid-build, it marks that job

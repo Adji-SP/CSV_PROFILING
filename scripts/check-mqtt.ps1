@@ -3,7 +3,10 @@
 param(
     [string] $EnvFile = (Join-Path $PSScriptRoot '..\.env'),
     [string] $PythonPath,
-    [switch] $ProbeDevice
+    [switch] $ProbeDevice,
+    [switch] $ProbeWebSocket,
+    [string] $MosquittoPub = 'F:\Mosquito\mosquitto_pub.exe',
+    [ValidateRange(1,65535)][int] $WebSocketPort = 9001
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env-file.ps1')
@@ -23,6 +26,6 @@ if (-not $PythonPath) {
     else { $PythonPath = (Get-Command python.exe -ErrorAction Stop).Source }
 }
 # Secrets travel through stdin, not command arguments or a diagnostic file.
-$payload = @{ root = $root; env = $config; probe_device = [bool] $ProbeDevice }
+$payload = @{ root = $root; env = $config; probe_device = [bool] $ProbeDevice; probe_websocket = [bool] $ProbeWebSocket; mosquitto_pub = $MosquittoPub; websocket_port = $WebSocketPort }
 $payload | ConvertTo-Json -Depth 4 -Compress | & $PythonPath (Join-Path $PSScriptRoot 'check-mqtt.py')
 if ($LASTEXITCODE -ne 0) { throw 'MQTT check failed. See the setting-specific message above; no credentials were printed.' }

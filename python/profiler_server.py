@@ -273,7 +273,7 @@ def app_config():
     host = request.host.split(":", 1)[0].lower()
     public_host = os.getenv("APP_PUBLIC_FRONTEND_HOST", "").strip().lower()
     local_api = os.getenv("APP_LOCAL_OTA_API_BASE_URL", "").strip() or (
-        "http://localhost:8080" if os.getenv("CSV_PORT") == "5173" else "http://localhost:7000"
+        "http://localhost:18080" if os.getenv("CSV_PORT") == "5173" else "http://localhost:7000"
     )
     public_api = os.getenv("APP_PUBLIC_OTA_API_BASE_URL", "").strip()
     ota_api = public_api if public_host and host == public_host and public_api else local_api

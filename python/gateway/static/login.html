@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · Data & Firmware</title>
+  <link rel="stylesheet" href="/gateway-login.css">
+  <script src="/gateway-login.js" defer></script>
+</head>
+<body>
+  <main class="login-card">
+    <div class="brand"><span class="brand-icon" aria-hidden="true">◈</span> Data & Firmware</div>
+    <h1>Welcome back.</h1>
+    <p class="intro">Log in to your dashboard.</p>
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="128" autofocus>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024">
+      <label for="code">Authenticator code</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" required maxlength="7" placeholder="6-digit code">
+      <p id="login-error" role="alert" aria-live="polite"></p>
+      <button type="submit" id="login-submit">Log in <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="footer">Use the account provided by your administrator.</p>
+  </main>
+</body>
+</html>

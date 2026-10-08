@@ -1,0 +1,9 @@
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1b283d;background:#f3f4f8;color-scheme:light}
+*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top,#e9e9ff 0,transparent 60%),#f3f4f8}
+.login-card{width:100%;max-width:420px;padding:38px;background:white;border:1px solid #e1e4ee;border-radius:18px;box-shadow:0 20px 70px #27324a0a}
+.brand{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:650;margin-bottom:36px}.brand-icon{color:#6056ed;background:#eeedff;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;font-size:24px}
+h1{font-size:28px;letter-spacing:-.8px;margin:0 0 8px;font-weight:650}.intro{margin:0 0 30px;color:#748095;font-size:14px}
+label{display:block;font-size:13px;font-weight:550;margin:18px 0 8px}input{width:100%;border:1px solid #d7dce7;border-radius:7px;padding:12px;font:inherit;font-size:16px;background:#fff;color:#1b283d}input:focus{outline:3px solid #6056ed22;border-color:#6056ed}
+button{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;border-radius:7px;background:#6056ed;color:white;padding:13px 16px;font:inherit;font-size:14px;font-weight:600;cursor:pointer}button:hover{background:#5045db}button:disabled{opacity:.65;cursor:wait}button:focus-visible{outline:3px solid #6056ed55;outline-offset:3px}
+#login-error{color:#c53045;min-height:20px;font-size:13px;margin:12px 0}.footer{font-size:12px;color:#7c8799;margin:24px 0 0;line-height:1.5}
+@media(max-width:480px){body{padding:16px}.login-card{padding:28px 24px}}

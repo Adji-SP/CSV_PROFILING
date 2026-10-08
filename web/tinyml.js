@@ -44,7 +44,7 @@
   async function request(path, raw = false) {
     if (!token) throw new Error("Enter the viewer token first.");
     const session = generation;
-    const response = await fetch(`${OTA_API_BASE}/api/tinyml${path}`, {headers: {Authorization: `Bearer ${token}`}});
+    const response = await fetch(`${OTA_API_BASE}/api/tinyml${path}`, {credentials: "include", headers: {Authorization: `Bearer ${token}`}});
     if (session !== generation) throw new Error("Session changed.");
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));

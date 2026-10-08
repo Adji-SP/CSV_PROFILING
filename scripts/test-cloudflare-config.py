@@ -19,6 +19,12 @@ def config(response):
 
 
 class BrowserConfigTests(unittest.TestCase):
+    def test_default_ports_match_launchers(self):
+        for port, api in (("5173", "http://localhost:18080"), ("5000", "http://localhost:7000")):
+            with patch.dict(os.environ, {"CSV_PORT": port}, clear=True):
+                response = app.test_client().get("/app-config.js", base_url=f"http://localhost:{port}")
+                self.assertEqual(config(response)["otaApiBase"], api)
+
     def test_public_and_local_select_different_api_origins(self):
         settings = {
             "CSV_PORT": "5173",

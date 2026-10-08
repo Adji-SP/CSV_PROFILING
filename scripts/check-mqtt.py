@@ -6,6 +6,9 @@ import ssl
 import struct
 import sys
 import uuid
+import subprocess
+import tempfile
+import time
 from urllib.parse import urlsplit
 
 
@@ -151,6 +154,43 @@ def check(config):
                 device.close()
         else:
             print("Device publishing not tested. Use -ProbeDevice for one labelled diagnostic log.")
+        if config.get("probe_websocket"):
+            executable = config.get("mosquitto_pub")
+            if not executable or not os.path.isfile(executable):
+                raise ValueError("Supply -MosquittoPub pointing to mosquitto_pub.exe for the local WebSocket check")
+            device_id = env.get("DEVICE_ID") or ""
+            if not device_id or not all(c.isascii() and (c.isalnum() or c in "-_") for c in device_id):
+                raise ValueError("DEVICE_ID is missing or invalid")
+            username = env.get("DEVICE_MQTT_USERNAME") or ""
+            password = env.get("DEVICE_MQTT_PASSWORD") or ""
+            if not username or not password or any(c in username + password for c in "\r\n"):
+                raise ValueError("Device username/password are required for the WebSocket check")
+            marker = uuid.uuid4().hex
+            message = json.dumps({"device_id": device_id, "level": "INFO", "target": "mqtt_setup_check",
+                "message": "Local WebSocket diagnostic, not ESP firmware: " + marker})
+            options = None
+            try:
+                # Credentials in a temporary user file, never process arguments.
+                with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as file:
+                    options = file.name
+                    file.write("-u " + username + "\n-P " + password + "\n")
+                result = subprocess.run([executable, "-o", options, "--ws", "-h", "127.0.0.1",
+                    "-p", str(config.get("websocket_port", 9001)), "-V", "mqttv311", "-q", "1",
+                    "-t", "devices/" + device_id + "/logs", "-s"], input=message.encode(),
+                    capture_output=True, timeout=12)
+                if result.returncode:
+                    raise ValueError("Local WebSocket MQTT publish failed; check listener 9001 and broker account")
+                deadline = time.monotonic() + 8
+                while time.monotonic() < deadline:
+                    kind, reply = read_packet(backend)
+                    if kind >> 4 == 3 and marker.encode() in reply:
+                        print("Loopback WebSocket publish -> TLS backend receive: PASS")
+                        break
+                else:
+                    raise ValueError("WebSocket diagnostic was not delivered")
+            finally:
+                if options is not None:
+                    os.unlink(options)
     finally:
         backend.close()
 
@@ -163,6 +203,9 @@ if __name__ == "__main__":
         sys.exit(1)
     except (TimeoutError, ConnectionError, socket.gaierror, OSError):
         print("FAIL: Broker connection/file access failed. Check broker listener, DNS, port, TLS files and firewall.")
+        sys.exit(1)
+    except subprocess.TimeoutExpired:
+        print("FAIL: MQTT WebSocket probe timed out.")
         sys.exit(1)
     except (ValueError, KeyError) as error:
         print("FAIL:", error)
