@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[2]
 DEVICE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 
 
+def totp_required(values) -> bool:
+    value = (values.get("GATEWAY_REQUIRE_TOTP") or "false").strip().lower()
+    if value not in {"true", "false"}:
+        raise ValueError("GATEWAY_REQUIRE_TOTP must be true or false.")
+    return value == "true"
+
+
 @dataclass
 class Config:
     origin: str
@@ -23,6 +30,7 @@ class Config:
     device_hashes: dict[str, str] = field(default_factory=dict, repr=False)
     viewer_token: str = field(default="", repr=False)
     totp_secret: str = field(default="", repr=False)
+    require_totp: bool = False
     csv_origin: str = "http://127.0.0.1:5173"
     ota_origin: str = "http://127.0.0.1:18080"
     max_body: int = 52 * 1024 * 1024
@@ -35,13 +43,14 @@ class Config:
             raise ValueError("GATEWAY_PUBLIC_URL must be an HTTPS origin without a trailing slash.")
         if not self.username or not self.password_hash.startswith("$argon2id$"):
             raise ValueError("Run setup-dashboard-login.ps1 to provision an administrator.")
-        # Two-factor login is mandatory: the gateway refuses to start without it.
-        try:
-            key = totp.decode_secret(self.totp_secret)
-        except ValueError:
-            key = b""
-        if len(key) < totp.MIN_KEY_BYTES:
-            raise ValueError("Two-factor login is not set up. Run setup-dashboard-login.ps1.")
+        # Opt-in only; retaining an old secret does not enable two-factor login.
+        if self.require_totp:
+            try:
+                key = totp.decode_secret(self.totp_secret)
+            except ValueError:
+                key = b""
+            if len(key) < totp.MIN_KEY_BYTES:
+                raise ValueError("Two-factor login is not set up. Run setup-dashboard-login.ps1.")
         for upstream in (self.csv_origin, self.ota_origin):
             parsed = urlsplit(upstream)
             if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
@@ -70,6 +79,7 @@ def load_config() -> Config:
         username=auth["username"], password_hash=auth["password_hash"],
         cookie_key=auth["cookie_key"], device_hashes=auth.get("devices", {}),
         totp_secret=auth.get("totp_secret", ""),
+        require_totp=totp_required(values),
         viewer_token=values.get("CONSOLE_VIEWER_TOKEN") or "",
         csv_origin=values.get("GATEWAY_CSV_ORIGIN") or "http://127.0.0.1:5173",
         ota_origin=values.get("GATEWAY_OTA_ORIGIN") or "http://127.0.0.1:18080",

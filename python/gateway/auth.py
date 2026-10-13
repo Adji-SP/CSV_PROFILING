@@ -46,7 +46,7 @@ class Auth:
     def __init__(self, config: Config):
         self.config = config
         self.hasher = PasswordHasher()
-        self.totp_key = totp.decode_secret(config.totp_secret)
+        self.totp_key = totp.decode_secret(config.totp_secret) if config.require_totp else None
         # A code is accepted once: any later login must use a newer time step.
         self.last_totp_counter = -1
         self.sessions: dict[str, LoginSession] = {}
@@ -90,28 +90,32 @@ class Auth:
         self.attempts.append(now)
         try:
             data = await read_json(request)
-            username, password, code = data["username"], data["password"], data.get("code", "")
+            username, password = data["username"], data["password"]
+            code = data.get("code", "") if self.config.require_totp else ""
             if not all(isinstance(value, str) for value in (username, password, code)):
                 raise ValueError()
             if len(username) > 128 or len(password) > 1024 or len(code) > 16:
                 raise ValueError()
         except (ValueError, KeyError, TypeError):
-            return error(400, "Enter your username, password and authenticator code.")
+            return error(400, "Enter your username, password and authenticator code."
+                         if self.config.require_totp else "Enter your username and password.")
         async with self.password_lock:
             try:
                 valid = await asyncio.to_thread(self.hasher.verify, self.config.password_hash, password)
             except (VerificationError, InvalidHashError):
                 valid = False
             valid = valid and hmac.compare_digest(username.encode(), self.config.username.encode())
-            # Checked under the lock so two requests cannot both spend the same code.
-            counter = totp.match(self.totp_key, code.replace(" ", ""))
-            if valid and counter is not None and counter > self.last_totp_counter:
-                self.last_totp_counter = counter
-            else:
-                valid = False
+            if self.config.require_totp:
+                # Checked under the lock so two requests cannot both spend the same code.
+                counter = totp.match(self.totp_key, code.replace(" ", ""))
+                if valid and counter is not None and counter > self.last_totp_counter:
+                    self.last_totp_counter = counter
+                else:
+                    valid = False
         if not valid:
             # One message for every factor: never reveal which part was wrong.
-            return error(401, "Username, password or authenticator code is incorrect.")
+            return error(401, "Username, password or authenticator code is incorrect."
+                         if self.config.require_totp else "Username or password is incorrect.")
         await self.revoke(request)
         if len(self.sessions) >= 32:
             return error(429, "Too many active sessions. Log out on another device first.")

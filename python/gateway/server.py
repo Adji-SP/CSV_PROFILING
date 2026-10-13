@@ -20,6 +20,9 @@ ASSETS = Path(__file__).parent / "static"
 def create_app(config: Config) -> web.Application:
     auth = Auth(config)
     proxy = Proxy(config, auth)
+    authenticator_field = (ASSETS / "authenticator.html").read_text(encoding="utf-8") if config.require_totp else ""
+    login_html = (ASSETS / "login.html").read_text(encoding="utf-8").replace(
+        "<!-- AUTHENTICATOR_FIELD -->", authenticator_field)
 
     @web.middleware
     async def boundary(request, handler):
@@ -69,7 +72,7 @@ def create_app(config: Config) -> web.Application:
     async def login_page(request):
         if await auth.browser(request):
             raise web.HTTPFound("/")
-        return web.FileResponse(ASSETS / "login.html")
+        return web.Response(text=login_html, content_type="text/html")
 
     async def session_info(request):
         if not await auth.browser(request):

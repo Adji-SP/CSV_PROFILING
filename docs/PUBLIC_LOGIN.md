@@ -19,8 +19,8 @@ One-time setup, from the repository root:
 .\scripts\setup-dashboard-login.ps1 -DeviceId ESP32-S3-001
 ```
 
-This also creates the two-factor login secret (see below). Use your real
-registered device ID. This creates the administrator account and a
+Login uses a username and password; the authenticator-app step is off by default.
+Use your real registered device ID. This creates the administrator account and a
 separate HTTP OTA credential for that device. It puts `DEVICE_OTA_TOKEN` in the
 ignored `.env`, and its SHA-256 digest in the private gateway configuration.
 Do not run device provisioning every start: it rotates the selected token.
@@ -51,18 +51,33 @@ enabled. Keep the PC, Tailscale and the launcher running. For future starts use
 `dev-public.ps1`; do not switch to `dev.ps1` or `dev-tailscale.ps1` while Funnel is
 enabled, because those older launchers do not start the gateway.
 
-## Two-factor login (authenticator app)
+## Optional authenticator app
 
-Logging in needs the password **and** a 6-digit code from an authenticator app
-(Google Authenticator, Microsoft Authenticator, Authy, 2FAS, ...). The gateway
-refuses to start until this is set up, so a public dashboard is never
-password-only.
+The authenticator step is currently disabled. You only need your existing
+username and password. No account reset, phone setup or firmware change is needed.
+Password protection, login limits, session expiry and device-token checks stay on.
+
+This setting in the root `.env` controls the extra step (missing means `false`):
+
+```env
+GATEWAY_REQUIRE_TOTP=false
+```
+
+Restart `dev-public.ps1` after changing it. The login page and server both follow
+this setting. Existing authenticator secrets remain private and are not erased;
+having a saved secret does not automatically turn the step back on.
+
+To enable it later, set `GATEWAY_REQUIRE_TOTP=true`, then:
 
 1. Run `.\scripts\setup-dashboard-login.ps1` (existing accounts keep their
    password; only the missing authenticator secret is created).
 2. Open `data/private/dashboard-totp-qr.svg` on the PC and scan it with the app,
    or type the setup key from `data/private/dashboard-totp.txt`.
 3. Delete both files after the app shows codes, then restart `dev-public.ps1`.
+
+If you already deleted the setup files and need to add the account to a new app,
+use `-ResetTotp` to generate a new secret. When enabled, the gateway refuses to
+start without a valid secret and requires a password **and** a 6-digit code.
 
 Each code works once: a code that was already accepted is rejected, even
 within its 30-second window. The PC clock must be correct (Windows: Settings >
@@ -81,7 +96,7 @@ a single session or **Log out all other sessions**; revoked browsers are sent
 to the login page and their monitoring sockets close immediately. The browser
 name comes from the browser's own User-Agent and can be faked, so treat it as a
 hint. If you see a session you don't recognize, revoke it, then reset the password
-and the authenticator (`-ResetPassword -ResetTotp`).
+(`-ResetPassword`). If you use the authenticator, reset it too (`-ResetTotp`).
 
 ## What the login protects
 
@@ -148,7 +163,9 @@ MQTT logs, and a remote browser can watch them through the authenticated gateway
 ```
 
 Restart `dev-public.ps1` afterwards. Password reset creates a new random password
-in the private handoff file. Device-token rotation requires rebuilding the
+in the private handoff file. `-ResetTotp` rotates the secret but does not enable
+the authenticator step; `GATEWAY_REQUIRE_TOTP` controls that.
+Device-token rotation requires rebuilding the
 selected device firmware. Never put real credentials in ZIPs, Git, screenshots
 or URLs. Remove a device's entry from the private `devices` mapping and restart
 the gateway to revoke it.
@@ -162,7 +179,8 @@ finally { Pop-Location }
 ```
 
 Tests use isolated local services and test credentials. They cover anonymous
-access, CSRF, password throttling, session expiry/logout, device boundaries,
+access, password-only login, optional authenticator codes, CSRF, password
+throttling, session expiry/logout, device boundaries,
 WebSocket authentication/logout, CSV events and streaming uploads/downloads.
 For the optional real-browser check, install Playwright in an ignored local
 directory and use the private credential handoff file (Microsoft Edge is used):
@@ -172,6 +190,9 @@ npm install --prefix data/browser-check --no-save --package-lock=false playwrigh
 $env:GATEWAY_TEST_URL='https://YOUR_HOSTNAME'
 node scripts/test-login-ui.cjs
 ```
+
+The browser check expects password-only login by default. If you deliberately
+enabled the authenticator, also set `$env:GATEWAY_TEST_REQUIRE_TOTP='true'`.
 
 The browser check logs in, checks CSV/OTA and shared monitoring access, then logs
 out. It never prints credentials. It saves only an empty mobile login screenshot

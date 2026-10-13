@@ -15,7 +15,7 @@ from cryptography.fernet import Fernet
 from dotenv import dotenv_values, set_key
 
 from . import totp
-from .config import ROOT, DEVICE_ID
+from .config import ROOT, DEVICE_ID, totp_required
 
 
 def private_directory(path: Path):
@@ -61,6 +61,7 @@ def main():
     parser.add_argument("--device-id", help="Provision/rotate this device's HTTP OTA credential.")
     parser.add_argument("--public-url", help="Use this HTTPS origin for the gateway and new firmware builds.")
     args = parser.parse_args()
+    require_totp = totp_required({**dotenv_values(ROOT / ".env", interpolate=False), **os.environ})
     if not 1 <= len(args.username) <= 128:
         parser.error("Username must contain between 1 and 128 characters.")
     if args.device_id and not DEVICE_ID.fullmatch(args.device_id):
@@ -86,8 +87,9 @@ def main():
         print("Administrator credentials saved in data/private/dashboard-login.txt")
     else:
         print("Administrator already provisioned; credentials unchanged.")
-    if not auth.get("totp_secret") or args.reset_totp:
+    if args.reset_totp or (require_totp and not auth.get("totp_secret")):
         provision_totp(directory, auth)
+    print("Authenticator code required." if require_totp else "Password-only login; authenticator step is disabled.")
     if args.device_id:
         token = secrets.token_urlsafe(32)
         auth.setdefault("devices", {})[args.device_id] = hashlib.sha256(token.encode()).hexdigest()

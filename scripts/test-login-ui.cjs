@@ -25,7 +25,6 @@ async function main() {
   const privateText = fs.readFileSync(path.join(root, 'data/private/dashboard-login.txt'), 'utf8');
   const username = privateText.match(/^Username: (.+)$/m)[1].trim();
   const password = privateText.match(/^Password: (.+)$/m)[1].trim();
-  const auth = JSON.parse(fs.readFileSync(path.join(root, 'data/private/dashboard-auth.json'), 'utf8'));
   const browser = await chromium.launch({headless: true, channel: 'msedge'});
   try {
     const context = await browser.newContext({viewport: {width: 1365, height: 900}});
@@ -41,7 +40,12 @@ async function main() {
     await page.setViewportSize({width: 1365, height: 900});
     await page.locator('#username').fill(username);
     await page.locator('#password').fill(password);
-    await page.locator('#code').fill(totpCode(auth.totp_secret));
+    const requiresTotp = process.env.GATEWAY_TEST_REQUIRE_TOTP === 'true';
+    assert.equal(await page.locator('#code').count(), requiresTotp ? 1 : 0);
+    if (requiresTotp) {
+      const auth = JSON.parse(fs.readFileSync(path.join(root, 'data/private/dashboard-auth.json'), 'utf8'));
+      await page.locator('#code').fill(totpCode(auth.totp_secret));
+    }
     await page.locator('#login-submit').click();
     await page.waitForURL(origin + '/');
     await page.locator('.topbar-actions button', {hasText: 'Log out'}).waitFor();

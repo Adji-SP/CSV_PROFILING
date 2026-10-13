@@ -12,7 +12,7 @@ from argon2 import PasswordHasher
 from cryptography.fernet import Fernet
 
 from . import totp
-from .config import Config
+from .config import Config, totp_required
 from .server import create_app
 
 ORIGIN = "https://dashboard.test"
@@ -97,9 +97,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         return result
 
     async def login(self, code=None, user_agent="test-browser"):
+        credentials = {"username": "admin", "password": PASSWORD}
+        if self.config.require_totp:
+            credentials["code"] = code or self.next_code()
         response = await self.client.post("/auth/login", headers=self.headers(Origin=ORIGIN, **{"User-Agent": user_agent}),
-                                          json={"username": "admin", "password": PASSWORD,
-                                                "code": code or self.next_code()})
+                                          json=credentials)
         self.assertEqual(response.status, 200, await response.text())
         cookie = response.cookies["__Host-dashboard"]
         self.assertTrue(cookie["secure"] and cookie["httponly"])
@@ -114,14 +116,56 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(totp.match(key, "081804", now=1111111109 + 90))
         self.assertIsNone(totp.match(key, "８１８０４", now=1111111109))
 
-    def test_config_requires_two_factor_secret(self):
+    def test_two_factor_is_opt_in_and_setting_is_validated(self):
+        self.assertFalse(totp_required({}))
+        self.assertFalse(totp_required({"GATEWAY_REQUIRE_TOTP": "false"}))
+        self.assertTrue(totp_required({"GATEWAY_REQUIRE_TOTP": "true"}))
+        with self.assertRaises(ValueError):
+            totp_required({"GATEWAY_REQUIRE_TOTP": "typo"})
+        for secret in ("", "not base32!", TOTP_SECRET):
+            config = Config(origin=ORIGIN, username="admin", password_hash=PASSWORD_HASH,
+                            cookie_key=Fernet.generate_key().decode(), viewer_token=VIEWER_TOKEN,
+                            totp_secret=secret)
+            self.assertFalse(config.require_totp)
+
+    def test_enabled_two_factor_requires_valid_secret(self):
         for secret in ("", "not base32!", "JBSWY3DP"):
             with self.assertRaises(ValueError):
                 Config(origin=ORIGIN, username="admin", password_hash=PASSWORD_HASH,
                        cookie_key=Fernet.generate_key().decode(), viewer_token=VIEWER_TOKEN,
-                       totp_secret=secret)
+                       totp_secret=secret, require_totp=True)
+
+    async def test_password_only_login_and_error_messages(self):
+        page = await self.client.get("/login", headers=self.headers())
+        html = await page.text()
+        self.assertNotIn('name="code"', html)
+        self.assertNotIn("Authenticator code", html)
+        for body, expected in [
+                ({"username": "admin", "password": "wrong"}, 401),
+                ({"username": "wrong", "password": PASSWORD}, 401),
+                ({"username": "admin", "password": None}, 400),
+                ({}, 400), ([], 400)]:
+            response = await self.client.post("/auth/login", headers=self.headers(Origin=ORIGIN), json=body)
+            self.assertEqual(response.status, expected)
+            self.assertNotIn("authenticator", await response.text())
+        # A retained secret must not silently re-enable the authenticator step.
+        self.assertEqual(self.config.totp_secret, TOTP_SECRET)
+        await self.login()
+
+    async def test_password_only_gateway_starts_without_authenticator_setup(self):
+        await self.client.close()
+        self.config.totp_secret = ""
+        self.client = TestClient(TestServer(create_app(self.config)))
+        await self.client.start_server()
+        await self.login()
 
     async def test_login_requires_fresh_authenticator_code(self):
+        await self.client.close()
+        self.config.require_totp = True
+        self.client = TestClient(TestServer(create_app(self.config)))
+        await self.client.start_server()
+        page = await self.client.get("/login", headers=self.headers())
+        self.assertIn('name="code"', await page.text())
         async def attempt(**body):
             return await self.client.post("/auth/login", headers=self.headers(Origin=ORIGIN),
                                           json={"username": "admin", "password": PASSWORD, **body})

@@ -17,8 +17,7 @@
       <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="128" autofocus>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024">
-      <label for="code">Authenticator code</label>
-      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" required maxlength="7" placeholder="6-digit code">
+      <!-- AUTHENTICATOR_FIELD -->
       <p id="login-error" role="alert" aria-live="polite"></p>
       <button type="submit" id="login-submit">Log in <span aria-hidden="true">→</span></button>
     </form>
