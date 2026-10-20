@@ -1,0 +1,4 @@
+    Updating crates.io index
+error: no matching package named `firmware-app-api` found
+location searched: crates.io index
+required by package `uploaded-firmware-with-libs v0.1.0 (D:\PropertiesProject-D\Kuliah\CSV_PROFILING\examples\uploaded-firmware-with-libs)`

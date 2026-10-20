@@ -146,10 +146,16 @@ Python executable. Dashboard builds pass these settings to `esp-idf-sys`, so it
 does not clone ESP-IDF beneath the uploaded project's long UUID path or invoke
 the Microsoft Store Python alias.
 
-For managed application uploads, `WIFI_SSID`, `WIFI_PASS`, `DEVICE_NAME`, and
-the optional `DEVICE_ID` are read from the server's `.env` and embedded at
-compile time. The password is never written to the build log. Restart the OTA
-server after changing these values.
+Managed firmware now includes an offline **Wi-Fi setup website**. With no saved
+network it opens a protected hotspot; after a disconnection it retries for about
+60 seconds before opening the hotspot again. Join `ESP32-Setup-XXXXXX` with the
+recovery password printed on USB serial, then open `http://192.168.4.1/`.
+See [the Wi-Fi setup guide](docs/WIFI_SETUP.md) for installation and recovery.
+
+`WIFI_SSID` and `WIFI_PASS` are optional first-boot fallback values. Saved settings
+on the ESP32 take precedence and survive normal application-only OTA updates.
+`DEVICE_NAME`, optional `DEVICE_ID`, and service credentials remain build-time
+configuration. Restart the OTA server after changing build-time values.
 
 CORS defaults to only `http://localhost:5000` and `http://127.0.0.1:5000`. Add separately served frontend origins to `OTA_ALLOWED_ORIGINS` as a comma-separated list.
 
@@ -332,10 +338,12 @@ logs before deploying that image again.
 To manually revert to an earlier version, select its retained, known-good image
 and use the normal Deploy action. This queues an OTA update to that version; it
 is different from ESP-IDF's automatic bootloader rollback after a bad boot.
-Both require a reachable device. If bad Wi-Fi credentials make the device
-offline, cancel the stale queued image first and recover over USB. Rebuilding
-after changing `.env` is essential: existing `.bin` files keep the credentials
-compiled into them. Give the corrected image a new version before deploying.
+Both require a reachable device. On firmware with the Wi-Fi setup manager,
+recover an offline device using its setup hotspot; no rebuild is needed to
+change Wi-Fi. Older images without that manager still require USB recovery when
+their compiled Wi-Fi credentials are unusable. Cancel a stale queued image
+before recovery. OTA/MQTT endpoints and service credentials are still embedded:
+changing those requires a new image with a new version.
 
 ## TinyML monitoring
 

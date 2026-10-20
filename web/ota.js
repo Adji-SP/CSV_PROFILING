@@ -384,18 +384,29 @@ function pollBuild(buildId) {
 
 async function openDeployDialog(deviceId, firmwareId) {
   try {
-    if (!otaDevices.length || !otaFirmware.length) {
-      await Promise.all([loadDevices(false), loadFirmware(false)]);
-    }
+    // Boards and builds can change while another section or tab is open.
+    // Fetch directly so a failed refresh cannot silently reuse stale choices.
+    const [devices, firmware] = await Promise.all([getDevices(), getFirmwareList()]);
+    otaDevices = devices;
+    otaFirmware = firmware;
+    renderDevices();
+    renderFirmware();
+    const readyFirmware = otaFirmware.filter(item => item.status === "ready");
     if (!otaDevices.length) throw new Error("Register an ESP32 device before deploying firmware.");
-    if (!otaFirmware.length) throw new Error("Build a ready firmware image before deploying.");
+    if (!readyFirmware.length) throw new Error("Build a ready firmware image before deploying.");
+    if (deviceId && !otaDevices.some(item => item.device_id === deviceId)) {
+      throw new Error("This device is no longer registered. Choose another device.");
+    }
+    if (firmwareId && !readyFirmware.some(item => item.firmware_id === firmwareId)) {
+      throw new Error("This firmware is no longer ready to deploy. Choose another image.");
+    }
 
     const deviceSelect = document.getElementById("deploy-device");
     const firmwareSelect = document.getElementById("deploy-firmware");
     deviceSelect.innerHTML = otaDevices.map((device) =>
       `<option value="${esc(device.device_id)}">${esc(device.name)} (${esc(device.device_id)})</option>`
     ).join("");
-    firmwareSelect.innerHTML = otaFirmware.map((firmware) =>
+    firmwareSelect.innerHTML = readyFirmware.map((firmware) =>
       `<option value="${esc(firmware.firmware_id)}">v${esc(firmware.version)} — ${esc(firmware.project)} — ${esc(otaTargetLabel(firmware.target))}</option>`
     ).join("");
     if (deviceId) deviceSelect.value = deviceId;

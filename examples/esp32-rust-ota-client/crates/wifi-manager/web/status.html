@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connection status · ESP32</title><link rel="stylesheet" href="/setup.css"><script src="/setup.js" defer></script>
+</head>
+<body data-page="status">
+  <main class="shell">
+    <header class="brand"><span class="mark" aria-hidden="true">↗</span><span>Device setup</span><span id="device-name" class="device">ESP32</span></header>
+    <section class="card status-card">
+      <span class="eyebrow">CONNECTION STATUS</span><h1 id="status-title">Checking your board…</h1>
+      <p id="status-message" role="status" aria-live="polite">Please stay connected to the setup hotspot.</p>
+      <div id="connection-warning" class="notice warning" role="status" hidden></div>
+      <dl><div><dt>Network</dt><dd id="status-network">—</dd></div><div><dt>Board IP</dt><dd id="status-ip">Not connected</dd></div></dl>
+      <p id="closing-message" class="notice success" hidden></p>
+      <p id="status-error" class="error" role="alert" hidden></p>
+      <a id="edit-network" class="primary button-link" href="/">Choose or change Wi-Fi</a>
+      <button id="retry" type="button" class="quiet wide" hidden>Retry saved network</button>
+    </section>
+    <footer id="status-footer">Your previous working settings stay safe until a new connection succeeds.</footer>
+  </main>
+</body>
+</html>

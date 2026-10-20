@@ -1604,9 +1604,12 @@ name = "wifi-manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "embedded-svc",
  "esp-idf-svc",
  "firmware-app-api",
  "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

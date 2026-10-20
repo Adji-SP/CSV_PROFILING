@@ -22,13 +22,14 @@ On Windows, the repository-root helper guides you through the process:
 
 ```powershell
 .\flash-esp32.ps1 -CheckOnly  # Check installed prerequisites; no build or device access
-.\flash-esp32.ps1 -BuildOnly  # Prompt for network settings, build, and generate OTA .bin
+.\flash-esp32.ps1 -BuildOnly -ProvisionWifi  # Build a Wi-Fi-portal image; do not flash
 .\flash-esp32.ps1             # Build, then ask before USB flashing and monitoring
 ```
 
 Run these from the repository root in PowerShell. The helper loads the Visual
-Studio and ESP Rust environments automatically. It prompts for a password without
-echoing it, and restores the calling shell's environment afterward. Credentials
+Studio and ESP Rust environments automatically and restores the calling shell's
+environment afterward. Wi-Fi credentials are optional: use the board's setup
+page, or supply first-boot fallback values. MQTT and other supplied credentials
 are still embedded in compiled firmware, so treat the firmware and build cache
 as sensitive. The helper does not save a credentials file or install tools.
 If needed, override `-PythonPath`, `-TargetDir`, or `-ToolsDir`. Cache directories
@@ -45,8 +46,9 @@ Use the ESP Rust environment and build-time values. `DEVICE_ID` is optional; whe
 absent the runtime derives a stable ID from the station MAC address.
 
 ```powershell
-$env:WIFI_SSID="your-ssid"
-$env:WIFI_PASS="your-password"
+# Optional first-boot fallback; leave empty to use the setup page.
+$env:WIFI_SSID=""
+$env:WIFI_PASS=""
 $env:OTA_SERVER_URL="http://192.168.1.5:7000"
 $env:DEVICE_NAME="Sensor node"
 cargo +esp build --release --target xtensa-esp32s3-espidf --locked
@@ -66,13 +68,39 @@ $releaseDir = Join-Path $targetDir "xtensa-esp32s3-espidf/release"
 # Run only after checking the board and supplying real network settings above.
 espflash flash --chip esp32s3 --monitor `
     --bootloader "$releaseDir/bootloader.bin" `
-    --partition-table partitions.csv --target-app-partition ota_0 `
+    --partition-table partitions.csv --target-app-partition ota_0 --erase-parts otadata `
     "$releaseDir/esp32-rust-ota-client"
 ```
 
 Prefer this explicit flash command over the basic `cargo run` runner, which does
 not specify the rollback-enabled bootloader. Initial USB flashing replaces the
 application and partition layout; it is not an OTA deployment.
+
+After an earlier OTA update, the board may still be configured to boot `ota_1`.
+The helper and USB command above erase only the `otadata` boot-selection partition
+so the newly flashed `ota_0` image runs. This does not erase NVS or the other
+application slot. See the [ESP Rust OTA documentation](https://esp-rs.github.io/esp-idf-svc/esp_idf_svc/ota/index.html).
+
+## Wi-Fi setup website and recovery hotspot
+
+The runtime now stores working Wi-Fi settings in the board's NVS partition.
+With no saved credentials it opens `ESP32-Setup-XXXXXX`. If a saved network
+becomes unavailable, it retries for about 60 seconds before opening the hotspot.
+Its per-board recovery password is printed on USB serial at boot (not MQTT).
+Join it and open **http://192.168.4.1/** to select a network and enter a password.
+The offline status page shows connection progress, retryable errors and the IP.
+The hotspot closes about 20 seconds after successful connection.
+
+`WIFI_SSID` / `WIFI_PASS` are now optional first-boot fallback values. Saved
+settings always win; neither new `.env` values nor `-ProvisionWifi` erase them.
+Future managed OTA images preserve settings unless NVS is erased or the
+partition/schema layout changes. No changes are required in the uploaded app.
+See [the complete setup/recovery guide](../../docs/WIFI_SETUP.md), including the
+physical-device acceptance checklist and security limitations.
+
+OTA/MQTT endpoints and service credentials still come from the firmware build.
+Use stable public hostnames to avoid LAN-IP changes. For changes to those values,
+restart the OTA server and build/deploy a new image, or rerun the USB helper.
 
 ## Windows build environment
 

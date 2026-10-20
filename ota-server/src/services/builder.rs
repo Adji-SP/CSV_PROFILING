@@ -96,8 +96,8 @@ struct ManagedFirmwareEnvironment {
 impl ManagedFirmwareEnvironment {
     fn load() -> Self {
         Self {
-            wifi_ssid: nonempty_env("WIFI_SSID"),
-            wifi_password: nonempty_env("WIFI_PASS"),
+            wifi_ssid: env::var("WIFI_SSID").ok(),
+            wifi_password: env::var("WIFI_PASS").ok(),
             device_name: nonempty_env("DEVICE_NAME"),
             device_id: nonempty_env("DEVICE_ID"),
             device_ota_token: nonempty_env("DEVICE_OTA_TOKEN"),
@@ -105,13 +105,7 @@ impl ManagedFirmwareEnvironment {
     }
 
     fn apply(&self, command: &mut Command) -> Result<(), BuildFailure> {
-        let ssid = self.wifi_ssid.as_deref().ok_or_else(|| {
-            BuildFailure::new("WIFI_SSID is not configured for the managed firmware build")
-        })?;
-        let password = self.wifi_password.as_deref().ok_or_else(|| {
-            BuildFailure::new("WIFI_PASS is not configured for the managed firmware build")
-        })?;
-        command.env("WIFI_SSID", ssid).env("WIFI_PASS", password);
+        self.apply_wifi_bootstrap(command);
         if let Some(name) = self.device_name.as_deref() {
             command.env("DEVICE_NAME", name);
         }
@@ -123,6 +117,13 @@ impl ManagedFirmwareEnvironment {
         }
         apply_device_certificates(command)?;
         Ok(())
+    }
+
+    fn apply_wifi_bootstrap(&self, command: &mut Command) {
+        // Saved board settings win. Empty values mean first-boot AP provisioning.
+        // Preserve spaces in actual SSIDs/passwords and clear stale inherited values.
+        command.env("WIFI_SSID", self.wifi_ssid.as_deref().unwrap_or(""));
+        command.env("WIFI_PASS", self.wifi_password.as_deref().unwrap_or(""));
     }
 }
 
@@ -630,6 +631,23 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{CargoLine, parse_cargo_line, select_elf};
+
+    #[test]
+    fn managed_wifi_is_optional_and_preserves_literal_credentials() {
+        let mut command = tokio::process::Command::new("cargo");
+        super::ManagedFirmwareEnvironment::default().apply_wifi_bootstrap(&mut command);
+        let values: std::collections::HashMap<_, _> = command.as_std().get_envs().collect();
+        assert_eq!(values[std::ffi::OsStr::new("WIFI_SSID")], Some(std::ffi::OsStr::new("")));
+        assert_eq!(values[std::ffi::OsStr::new("WIFI_PASS")], Some(std::ffi::OsStr::new("")));
+        let settings = super::ManagedFirmwareEnvironment {
+            wifi_ssid: Some(" network ".into()), wifi_password: Some(" password ".into()),
+            ..Default::default()
+        };
+        settings.apply_wifi_bootstrap(&mut command);
+        let values: std::collections::HashMap<_, _> = command.as_std().get_envs().collect();
+        assert_eq!(values[std::ffi::OsStr::new("WIFI_SSID")], Some(std::ffi::OsStr::new(" network ")));
+        assert_eq!(values[std::ffi::OsStr::new("WIFI_PASS")], Some(std::ffi::OsStr::new(" password ")));
+    }
 
     #[test]
     fn cargo_messages_only_select_current_projects_binary() {

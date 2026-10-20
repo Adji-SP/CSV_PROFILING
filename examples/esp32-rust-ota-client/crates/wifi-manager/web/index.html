@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Set up Wi-Fi · ESP32</title><link rel="stylesheet" href="/setup.css"><script src="/setup.js" defer></script>
+</head>
+<body data-page="setup">
+  <main class="shell">
+    <header class="brand"><span class="mark" aria-hidden="true">↗</span><span>Device setup</span><span id="device-name" class="device">ESP32</span></header>
+    <section class="card">
+      <div class="intro"><span class="eyebrow">LET'S GET CONNECTED</span><h1>A new home for your board.</h1><p>Choose your 2.4 GHz Wi-Fi. The board will remember it after updates.</p></div>
+      <div id="connection-warning" class="notice warning" role="status" hidden></div>
+      <div class="section-heading"><h2>Nearby networks</h2><button id="scan" type="button" class="quiet" disabled>Refresh</button></div>
+      <p id="scan-message" class="muted" role="status">Loading networks…</p>
+      <div id="networks" class="networks" aria-label="Available Wi-Fi networks"></div>
+      <form id="wifi-form" novalidate>
+        <label for="ssid">Wi-Fi name</label><input id="ssid" name="ssid" autocomplete="off" placeholder="Select above or enter a hidden network" required aria-describedby="ssid-help">
+        <small id="ssid-help">Use the network name exactly as it appears on your router.</small>
+        <div class="password-heading"><label for="password">Password</label><button id="show-password" type="button" class="text-button" aria-pressed="false" aria-controls="password">Show password</button></div>
+        <input id="password" name="password" type="password" autocomplete="new-password" placeholder="Your Wi-Fi password" aria-describedby="form-error">
+        <label class="check"><input id="open-network" type="checkbox">This network has no password</label>
+        <p id="form-error" class="error" role="alert" hidden></p>
+        <button id="connect" type="submit" class="primary" disabled>Connect &amp; save</button>
+      </form>
+      <div class="saved"><span id="saved-network">No saved network yet.</span><button id="retry" type="button" class="text-button" hidden>Retry saved network</button></div>
+      <a href="/status" class="status-link">View connection status →</a>
+    </section>
+    <footer>Settings stay on this board. This setup hotspot has no internet.<br>If your phone asks, choose <strong>Stay connected</strong>.</footer>
+    <noscript><p class="notice warning">Enable JavaScript to scan networks and configure this board.</p></noscript>
+  </main>
+</body>
+</html>

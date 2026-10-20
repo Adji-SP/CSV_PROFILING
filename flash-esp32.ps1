@@ -10,13 +10,14 @@ Build the managed ESP32-S3 firmware and optionally flash it over USB.
 .\flash-esp32.ps1 -CheckOnly
 .NOTES
 Requires ESP Rust, Visual Studio C++ Build Tools, base Python, ldproxy and espflash.
-Passwords are prompted securely, but necessarily embedded in the compiled firmware.
+Wi-Fi can be provisioned on the board; optional first-boot credentials are embedded.
 No tools are installed automatically. No flash operation runs without confirmation.
 #>
 [CmdletBinding()]
 param(
     [switch] $BuildOnly,
     [switch] $CheckOnly,
+    [switch] $ProvisionWifi,
     [string] $WifiSsid,
     [Security.SecureString] $WifiPassword,
     [string] $ServerUrl,
@@ -48,6 +49,7 @@ try {
     . (Join-Path $PSScriptRoot 'scripts\env-file.ps1')
     Import-FirmwareEnvironment -Path $EnvFile -Root $PSScriptRoot
     if (-not $WifiSsid) { $WifiSsid = $env:WIFI_SSID }
+    if ($ProvisionWifi) { $WifiSsid = ''; $WifiPassword = $null; $env:WIFI_PASS = '' }
     if (-not $ServerUrl) { $ServerUrl = $env:OTA_SERVER_URL }
     if (-not $ServerUrl) { $ServerUrl = $env:OTA_PUBLIC_BASE_URL }
     if (-not $PSBoundParameters.ContainsKey('DeviceName') -and $env:DEVICE_NAME) { $DeviceName = $env:DEVICE_NAME }
@@ -115,10 +117,9 @@ try {
     }
 
     Write-Host 'This example requires an ESP32-S3 with at least 4 MiB flash.'
-    Write-Host 'Network credentials are embedded in the firmware. Do not share that firmware publicly.'
-    if (-not $WifiSsid) { $WifiSsid = Read-Host 'Wi-Fi name (SSID)' }
-    if ([string]::IsNullOrWhiteSpace($WifiSsid) -or [Text.Encoding]::UTF8.GetByteCount($WifiSsid) -gt 32) {
-        throw 'Wi-Fi name must contain 1-32 UTF-8 bytes.'
+    Write-Host 'Saved board Wi-Fi takes priority. Otherwise use the setup hotspot or optional first-boot credentials.'
+    if ([Text.Encoding]::UTF8.GetByteCount([string] $WifiSsid) -gt 32 -or ([string] $WifiSsid).Contains([char]0)) {
+        throw 'Wi-Fi name must fit 32 UTF-8 bytes and cannot contain null characters.'
     }
     if (-not $ServerUrl) { $ServerUrl = Read-Host 'OTA server LAN or public HTTPS URL' }
     $server = $null
@@ -128,14 +129,19 @@ try {
         $server.Query -or $server.Fragment -or $server.AbsolutePath -ne '/') {
         throw 'Use the PC LAN base URL, with no credentials, path, query, or fragment; not localhost or 0.0.0.0.'
     }
-    if (-not $WifiPassword -and -not $env:WIFI_PASS) { $WifiPassword = Read-Host 'Wi-Fi password' -AsSecureString }
     if ($WifiPassword) {
         $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($WifiPassword)
         try { $env:WIFI_PASS = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer) }
         finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
     }
-    if ([Text.Encoding]::UTF8.GetByteCount([string] $env:WIFI_PASS) -gt 64) { throw 'Wi-Fi password exceeds 64 bytes.' }
-    $env:WIFI_SSID = $WifiSsid
+    if (-not $WifiSsid) { $env:WIFI_PASS = '' }
+    $wifiPasswordBytes = [Text.Encoding]::UTF8.GetByteCount([string] $env:WIFI_PASS)
+    if ($WifiSsid -and $wifiPasswordBytes -ne 0 -and
+        (($wifiPasswordBytes -lt 8 -or $wifiPasswordBytes -gt 63) -and $env:WIFI_PASS -notmatch '^[0-9A-Fa-f]{64}$')) {
+        throw 'Wi-Fi password must be 8-63 UTF-8 bytes, 64 hex digits, or empty for an open network.'
+    }
+    if (([string] $env:WIFI_PASS).Contains([char]0)) { throw 'Wi-Fi password cannot contain null characters.' }
+    $env:WIFI_SSID = [string] $WifiSsid
     $env:OTA_SERVER_URL = $ServerUrl.TrimEnd('/')
     $env:DEVICE_NAME = $DeviceName
     $env:FIRMWARE_VERSION = $Version
@@ -146,7 +152,8 @@ try {
         }
         Write-Host 'MQTT configuration loaded for firmware. Credentials will not be printed.'
     } else { Write-Host 'MQTT is not configured: this image will use USB-only logs.' }
-    Write-Host "Firmware Wi-Fi SSID: $WifiSsid"
+    if ($WifiSsid) { Write-Host "Optional first-boot Wi-Fi: $WifiSsid (saved settings on the board take priority)" }
+    else { Write-Host 'Wi-Fi: saved board settings or setup hotspot. Read the setup password on USB serial.' }
     Write-Host "Firmware OTA URL: $($env:OTA_SERVER_URL)"
 
     Write-Host 'Building firmware. Compiler errors will remain visible.'
@@ -171,13 +178,16 @@ try {
     if (-not $Port) { $Port = Read-Host 'ESP32 serial port (for example COM5)' }
     if ($Port -notmatch '^COM[1-9][0-9]*$') { throw 'Specify a Windows COM port, such as COM5.' }
     Write-Host "WARNING: Flashing $Port replaces its bootloader, partition table and application."
+    Write-Host 'OTA boot selection will be reset so the board starts the newly flashed ota_0 image.'
     Write-Host 'Back up important firmware/data first. Close other serial monitors.'
     Write-Host 'Confirm this is your ESP32-S3, with at least 4 MiB flash, and that this partition layout is appropriate.'
     $confirmation = Read-Host "Type FLASH $Port to proceed, or press Enter to cancel"
     if ($confirmation -cne "FLASH $Port") { Write-Host 'Cancelled. Firmware was built, but nothing was flashed.'; return }
+    # A previous OTA deployment may still select ota_1. Writing ota_0 alone does
+    # not change that selection, so the board would keep running the old image.
     Invoke-Tool espflash @('flash', '-S', '--chip', 'esp32s3', '--port', $Port, '--monitor',
         '--bootloader', $bootloader, '--partition-table', $partitionTable,
-        '--target-app-partition', 'ota_0', $elf)
+        '--target-app-partition', 'ota_0', '--erase-parts', 'otadata', $elf)
 }
 finally {
     # No credentials or developer-shell environment are left in the caller's shell.
